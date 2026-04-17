@@ -10,6 +10,8 @@ import { idempotencyKey, traceId, txnRef } from "@/lib/ids";
 import { maskNin } from "@/lib/mask";
 import { rateLimit } from "@/server/rateLimit";
 import { enqueuePrognosis } from "@/server/outbox";
+import { notifyNinValidated } from "@/server/notify";
+import { appConfig } from "@/config/app";
 import type { NinValidationResult } from "@/types/domain";
 
 export interface NinSubmitResult {
@@ -82,6 +84,14 @@ export async function submitBeneficiaryNin(input: unknown): Promise<NinSubmitRes
     if (!write.ok && write.retryable) {
       await enqueuePrognosis(payload);
       retryScheduled = true;
+    }
+
+    if (appConfig.sendReceiptEmail) {
+      // Best-effort; never block the flow. Real email path falls back
+      // silently when the member has no email on file.
+      await notifyNinValidated({
+        fullName: result.verifiedFullName,
+      }).catch(() => undefined);
     }
   }
 

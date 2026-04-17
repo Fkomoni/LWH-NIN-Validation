@@ -39,20 +39,27 @@ export async function notifyLockout(args: {
     vars,
   });
   if (!res.ok) {
-    // Don't bubble — lockout itself must still succeed. Surface in the log.
     log.error({ reason: res.reason, enrolleeId: args.enrolleeId }, "security.email.failed");
   }
 }
 
+/**
+ * Fire-and-forget receipt email on successful NIN validation. No email
+ * on file ⇒ silent no-op (Phase 1). Phase 2 pulls email from the
+ * Prognosis bio record.
+ */
 export async function notifyNinValidated(args: {
-  email?: string;
-  phone?: string;
   fullName: string;
+  email?: string;
 }): Promise<void> {
-  if (!args.email && !args.phone) return;
-  await getServices().notification.send({
-    kind: "nin.validated.email",
-    to: { email: args.email, phone: args.phone },
-    vars: { fullName: args.fullName },
-  });
+  if (!args.email) return;
+  try {
+    await getServices().notification.send({
+      kind: "nin.validated.email",
+      to: { email: args.email },
+      vars: { fullName: args.fullName },
+    });
+  } catch (err) {
+    log.error({ err: String(err) }, "nin.receipt.failed");
+  }
 }

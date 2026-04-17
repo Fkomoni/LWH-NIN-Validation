@@ -2,13 +2,21 @@ import { z } from "zod";
 import { isIsoDate, isPlausibleDob } from "@/lib/validation/dob";
 import { isValidNinFormat } from "@/lib/validation/nin";
 
-/** Leadway enrollee ID: alphanumeric, 6–16 chars (tighten once confirmed). */
+/**
+ * Leadway enrollee ID. Real Leadway format is numeric with a `/N` suffix
+ * (e.g. "21000645/0" for the principal, "21000645/1" for a dependant).
+ * Historical demo IDs like "LWH-0001" are still accepted so the Phase-1
+ * walkthrough scenarios keep working.
+ */
 export const enrolleeIdSchema = z
   .string({ required_error: "Please enter your Enrollee ID." })
   .trim()
-  .min(6, "Enrollee ID is too short.")
-  .max(20, "Enrollee ID is too long.")
-  .regex(/^[A-Za-z0-9-]+$/, "Enrollee ID may only contain letters, numbers and dashes.");
+  .min(4, "Enrollee ID is too short.")
+  .max(30, "Enrollee ID is too long.")
+  .regex(
+    /^[A-Za-z0-9/\-]+$/,
+    "Enrollee ID may only contain letters, numbers, dashes and slashes.",
+  );
 
 export const dobSchema = z
   .string({ required_error: "Please enter your date of birth." })

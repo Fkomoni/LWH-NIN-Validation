@@ -61,16 +61,19 @@ export const appConfig = {
   },
 
   /**
-   * Support + security-ops contact. TODO(client): replace with real values.
+   * Support + security-ops contact.
+   * Security-ops email confirmed by client (17 Apr 2026): f-komoni-mbaekwe@leadway.com
    */
   contact: {
-    // TODO(client): confirm support phone + hours
+    // TODO(client): confirm support phone + hours — awaited.
     supportPhone: "+234-000-000-0000",
     supportEmail: "support@leadway.com",
     supportHours: "Mon–Fri, 8am–6pm WAT",
-    // TODO(client): confirm the real security-ops mailing list
-    securityOpsEmail: "leadway_security_ops@leadway.com",
+    securityOpsEmail: "f-komoni-mbaekwe@leadway.com",
   },
+
+  /** Send a receipt email on successful NIN validation (confirmed). */
+  sendReceiptEmail: true,
 
   timezone: "Africa/Lagos",
 
