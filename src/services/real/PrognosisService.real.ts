@@ -96,6 +96,19 @@ export const realPrognosisService: PrognosisService = {
         DOB: dobNum,
       };
 
+      log.info(
+        {
+          path: PATH,
+          memberId: payload.memberId,
+          txnRef: payload.txnRef,
+          bodyKeys: Object.keys(body),
+          hasGender: Boolean(body.Gender),
+          hasPhone: Boolean(body.PHoneNumber),
+          dob: body.DOB,
+        },
+        "prognosis.update.request",
+      );
+
       const token = await getPrognosisToken();
       const res = await fetch(`${base}${PATH}`, {
         method: "POST",
@@ -107,21 +120,41 @@ export const realPrognosisService: PrognosisService = {
         },
         body: JSON.stringify(body),
       });
+      const parsed = (await res.json().catch(() => null)) as UpdateMemberDataResponse | null;
+
+      log.info(
+        {
+          path: PATH,
+          status: res.status,
+          keys: parsed && typeof parsed === "object" ? Object.keys(parsed) : [],
+          resultSuccess: parsed?.result?.Success,
+          resultMessage: parsed?.result?.Message,
+          txnRef: payload.txnRef,
+        },
+        "prognosis.update.response",
+      );
 
       if (res.status >= 500) {
+        log.error(
+          { status: res.status, txnRef: payload.txnRef },
+          "prognosis.update.5xx",
+        );
         return { ok: false, reason: "PROVIDER_ERROR", retryable: true };
       }
+      if (res.status === 409) {
+        return { ok: false, reason: "DUPLICATE", retryable: false };
+      }
       if (!res.ok) {
-        // 4xx — auth / payload shape issue. Retryable in case of
-        // transient provider flakiness; outbox caps attempts at 6.
-        log.error({ status: res.status }, "prognosis.update.4xx");
+        log.error(
+          { status: res.status, message: parsed?.result?.Message, txnRef: payload.txnRef },
+          "prognosis.update.4xx",
+        );
         return { ok: false, reason: "PROVIDER_ERROR", retryable: true };
       }
 
-      const parsed = (await res.json().catch(() => null)) as UpdateMemberDataResponse | null;
       const result = parsed?.result;
       if (!result) {
-        log.error({ status: res.status }, "prognosis.update.bad-body");
+        log.error({ status: res.status, txnRef: payload.txnRef }, "prognosis.update.bad-body");
         return { ok: false, reason: "PROVIDER_ERROR", retryable: true };
       }
 

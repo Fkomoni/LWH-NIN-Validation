@@ -68,7 +68,7 @@ export function HouseholdTable({ household }: { household: Household }) {
     setRows((r) => ({ ...r, [id]: { ...r[id]!, status: "VALIDATING", message: undefined } }));
     startTransition(async () => {
       try {
-        const { result } = await submitBeneficiaryNin({
+        const { result, retryScheduled } = await submitBeneficiaryNin({
           beneficiaryId: id,
           nin: row.nin.trim(),
         });
@@ -78,16 +78,20 @@ export function HouseholdTable({ household }: { household: Household }) {
             ...r[id]!,
             status:
               result.outcome === "PASS_AUTO"
-                ? "VALIDATED"
+                ? retryScheduled
+                  ? "VALIDATING" // NIMC passed, Prognosis write parked for retry
+                  : "UPDATED"
                 : result.outcome === "REVIEW_SOFT"
                   ? "MANUAL_REVIEW"
                   : result.outcome === "TIMEOUT" || result.outcome === "PROVIDER_ERROR"
                     ? "NOT_SUBMITTED" // transient — row stays editable for retry
                     : "FAILED",
             message:
-              result.outcome === "TIMEOUT" || result.outcome === "PROVIDER_ERROR"
-                ? "NIMC is temporarily unavailable. Please try again in a moment."
-                : result.message,
+              result.outcome === "PASS_AUTO" && retryScheduled
+                ? "NIN verified. Finalising the update — you'll see it refresh shortly."
+                : result.outcome === "TIMEOUT" || result.outcome === "PROVIDER_ERROR"
+                  ? "NIMC is temporarily unavailable. Please try again in a moment."
+                  : result.message,
             supportRef: result.supportRef,
           },
         }));
