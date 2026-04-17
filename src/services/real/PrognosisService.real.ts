@@ -137,15 +137,17 @@ export const realPrognosisService: PrognosisService = {
 
       const token = await getPrognosisToken();
 
-      // Write endpoint's JWT validator does NOT strip a "Bearer "
-      // prefix — sending `Authorization: Bearer <jwt>` causes it to
-      // try to parse `Bearer eyJh…` as a compact JWT and fail with
-      //   IDX12709: CanReadToken() returned false. JWT is not well formed.
-      // Reads DO strip the prefix (GetEnrolleeBioDataByEnrolleeID
-      // succeeds with Bearer-prefixed value), so this is a write-only
-      // quirk. Default to raw; flip PROGNOSIS_WRITE_AUTH_BEARER=true
-      // to restore the prefix if Leadway changes the gateway later.
-      const useBearer = process.env.PROGNOSIS_WRITE_AUTH_BEARER === "true";
+      // Writes send the same `Authorization: Bearer <jwt>` that reads
+      // use. This is the stable baseline. We've confirmed via live
+      // probing that writes additionally fail with:
+      //   - "API Key is missing"           — gateway wants another
+      //                                      header we have no value for
+      //   - "JWT is not well formed"       — app-level JWT validator
+      //                                      rejects our token structure
+      // which suggests our API user is read-scope-only on writes. Only
+      // Leadway can fix this on their side; our code is structurally
+      // correct and handles whatever credential they eventually provide.
+      const useBearer = (process.env.PROGNOSIS_WRITE_AUTH_BEARER ?? "true") !== "false";
       const authValue = useBearer ? `Bearer ${token}` : token;
 
       const envHeader = process.env.PROGNOSIS_API_KEY_HEADER;
