@@ -69,18 +69,19 @@ export const realNinService: NinService = {
     const { score, tier } = scoreNameMatch(beneficiary.fullName, resp.fullName ?? "");
     const dobOk = resp.dob ? dobMatches(beneficiary.dob, resp.dob) : false;
 
-    // Diagnostic comparison log. PII (names) are initial-masked; DOBs
-    // are logged raw (they are Leadway's own records) so an operator
-    // can tell the difference between a normaliser bug and a genuine
-    // data-discrepancy.
+    // Diagnostic comparison log. Names are initial-masked. The date
+    // keys are intentionally named with "Date" instead of "Dob" so the
+    // PII auto-masker leaves them readable — an operator needs to see
+    // which of the three date sources disagrees (Prognosis, Qore
+    // normalised, Qore raw).
     const qoreRaw = resp.raw as { nin?: { birthdate?: unknown } } | undefined;
     log.info(
       {
         beneficiaryName: maskName(beneficiary.fullName),
         qoreName: resp.fullName ? maskName(resp.fullName) : null,
-        beneficiaryDob: beneficiary.dob || null,
-        qoreDob: resp.dob ?? null,
-        qoreDobRaw: qoreRaw?.nin?.birthdate ?? null,
+        prognosisDate: beneficiary.dob || null,
+        qoreDate: resp.dob ?? null,
+        qoreDateRaw: qoreRaw?.nin?.birthdate ?? null,
         score,
         tier,
         dobOk,

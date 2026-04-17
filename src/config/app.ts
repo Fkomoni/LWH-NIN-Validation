@@ -45,12 +45,19 @@ export const appConfig = {
   },
 
   /**
-   * NIN name-match thresholds — Jaro-Winkler on normalised strings.
-   * Tunable here so Ops can adjust without redeploy (Phase 2: move to DB).
+   * NIN name-match thresholds — Jaro-Winkler on normalised strings
+   * (title-stripped, diacritic-folded, token-sorted).
+   *
+   * Client policy (17 Apr 2026): 50% name + 100% DOB is enough to
+   * auto-pass. Manual-review band kept narrow for edge cases where
+   * names are very different (e.g. married-name change) but DOB still
+   * matches — ops can approve after a quick look.
+   *
+   * DOB match remains strict (exact ISO equality) regardless of tier.
    */
   nameMatch: {
-    autoPassMin: 0.92,
-    manualReviewMin: 0.8,
+    autoPassMin: 0.5,
+    manualReviewMin: 0.4,
   },
 
   /**

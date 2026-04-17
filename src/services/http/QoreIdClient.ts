@@ -110,25 +110,33 @@ function unwrapQore(body: unknown): QoreBody {
 
 function extractFullName(raw: QoreBody): string | undefined {
   const b = unwrapQore(raw);
-  const direct = pick(b, ["fullName", "fullname", "full_name", "FullName", "name"]);
+  const direct = pick(b, ["fullname", "fullName", "full_name", "FullName", "name"]);
   if (direct) return direct;
   const first = pick(b, [
+    "firstname", // Qore's actual key
     "firstName",
-    "firstname",
     "first_name",
     "givenName",
     "givennames",
     "FirstName",
   ]);
-  const middle = pick(b, ["middleName", "middlename", "middle_name", "MiddleName"]);
-  const last = pick(b, ["lastName", "lastname", "last_name", "surname", "LastName", "Surname"]);
+  const middle = pick(b, ["middlename", "middleName", "middle_name", "MiddleName"]);
+  const last = pick(b, ["lastname", "lastName", "last_name", "surname", "LastName", "Surname"]);
   const parts = [first, middle, last].filter(Boolean);
   return parts.length ? parts.join(" ") : undefined;
 }
 
 function extractDob(raw: QoreBody): string | undefined {
   const b = unwrapQore(raw);
-  const val = pick(b, ["dateOfBirth", "dob", "DateOfBirth", "birthDate", "BirthDate"]);
+  const val = pick(b, [
+    "birthdate", // Qore's actual key (all lowercase)
+    "dateOfBirth",
+    "dob",
+    "DateOfBirth",
+    "birthDate",
+    "BirthDate",
+    "DOB",
+  ]);
   if (!val) return undefined;
   if (/^\d{4}-\d{2}-\d{2}/.test(val)) return val.slice(0, 10);
   const m = val.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/);
