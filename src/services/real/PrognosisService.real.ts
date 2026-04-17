@@ -5,6 +5,22 @@ import { getEnrolleeBioData } from "../http/PrognosisMemberClient";
 import { log } from "@/lib/logger";
 
 /**
+ * Compute the principal enrollee id from any family member id.
+ * Prognosis encodes principal=/0, dependants=/1../N.
+ */
+function principalIdOf(memberId: string): string | null {
+  const m = memberId.match(/^(.+)\/\d+$/);
+  if (!m) return null;
+  return `${m[1]}/0`;
+}
+
+/** Count digits in a phone string. Prognosis rejects < 10. */
+function phoneDigitCount(phone: string | undefined | null): number {
+  if (!phone) return 0;
+  return phone.replace(/\D/g, "").length;
+}
+
+/**
  * PrognosisService — write path.
  *
  * Confirmed endpoint + shapes (17 Apr 2026):
@@ -114,10 +130,29 @@ export const realPrognosisService: PrognosisService = {
         return { ok: false, reason: "PROVIDER_ERROR", retryable: false };
       }
 
+      // Dependants (especially children) often have no phone on their
+      // own record; Prognosis's update validator rejects phones with
+      // < 10 digits. Inherit from the principal when the dependant
+      // has no valid phone on file.
+      let phone = bio.phone ?? "";
+      if (phoneDigitCount(phone) < 10) {
+        const principalId = principalIdOf(payload.memberId);
+        if (principalId && principalId !== payload.memberId) {
+          const principalBio = await getEnrolleeBioData(principalId);
+          if (phoneDigitCount(principalBio?.phone) >= 10) {
+            phone = principalBio!.phone!;
+            log.info(
+              { memberId: payload.memberId, principalId },
+              "prognosis.update.phone-inherited",
+            );
+          }
+        }
+      }
+
       const body = {
         Gender: bio.gender ?? "",
         NIN: payload.nin,
-        PHoneNumber: bio.phone ?? "",
+        PHoneNumber: phone,
         Enrolleeid: payload.memberId,
         DOB: dobNum,
       };
