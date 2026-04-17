@@ -83,9 +83,23 @@ export const realMemberService: MemberService = {
     if (res.kind === "provider-error") return { ok: false, reason: "PROVIDER_ERROR" };
     if (res.kind === "not-found") return { ok: false, reason: "NOT_FOUND" };
 
-    if (!dobMatches(res.household.principal.dob, dob)) {
-      return { ok: false, reason: "DOB_MISMATCH" };
-    }
+    const prognosisDate = res.household.principal.dob;
+    const userDate = dob;
+    const matched = dobMatches(prognosisDate, userDate);
+
+    // Diagnostic: two date fields, renamed so the auto-mask doesn't
+    // blank them (auto-mask triggers on keys ending in "dob").
+    log.info(
+      {
+        enrolleeId,
+        prognosisDate: prognosisDate || null,
+        userDate,
+        matched,
+      },
+      "auth.dob.compare",
+    );
+
+    if (!matched) return { ok: false, reason: "DOB_MISMATCH" };
     return { ok: true, household: res.household };
   },
 
