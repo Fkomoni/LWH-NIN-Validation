@@ -62,7 +62,7 @@ export default async function ReviewsPage() {
                       {new Date(r.createdAt).toLocaleString("en-NG", { timeZone: "Africa/Lagos" })}
                     </p>
                   </div>
-                  <ReviewActions id={r.id} adminId={admin.id} />
+                  <ReviewActions id={r.id} />
                 </li>
               ))}
             </ul>

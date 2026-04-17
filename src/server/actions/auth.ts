@@ -25,8 +25,10 @@ export type AuthStartState =
 
 async function ipAndUa(): Promise<{ ip: string; ua: string }> {
   const h = await headers();
+  // Always prefer the IP our middleware already resolved (trusted
+  // source, see F-07). Do NOT fall back to first-hop XFF here.
   return {
-    ip: h.get("x-client-ip") ?? h.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "0.0.0.0",
+    ip: h.get("x-client-ip") ?? "0.0.0.0",
     ua: h.get("user-agent") ?? "",
   };
 }
@@ -106,12 +108,16 @@ export async function authStart(
   }
 
   await clearFailures(parsed.data.enrolleeId);
-  await setSession({
-    enrolleeId: parsed.data.enrolleeId,
-    authedAt: new Date().toISOString(),
-    channel: "DOB",
-    mocked: true,
-  });
+  {
+    const now = new Date().toISOString();
+    await setSession({
+      enrolleeId: parsed.data.enrolleeId,
+      authedAt: now,
+      lastSeenAt: now,
+      channel: "DOB",
+      mocked: appConfig.mocksEnabled,
+    });
+  }
   await audit({
     action: "auth.dob.success",
     actorType: "portal-user",
@@ -218,12 +224,16 @@ export async function authByPrincipalNin(
   }
 
   await clearFailures(parsed.data.enrolleeId);
-  await setSession({
-    enrolleeId: parsed.data.enrolleeId,
-    authedAt: new Date().toISOString(),
-    channel: "PRINCIPAL_NIN",
-    mocked: appConfig.mocksEnabled,
-  });
+  {
+    const now = new Date().toISOString();
+    await setSession({
+      enrolleeId: parsed.data.enrolleeId,
+      authedAt: now,
+      lastSeenAt: now,
+      channel: "PRINCIPAL_NIN",
+      mocked: appConfig.mocksEnabled,
+    });
+  }
 
   // 5. Fire the Prognosis write for the principal's NIN. Uses the same
   //    outbox + after() pattern as per-row submissions so the response

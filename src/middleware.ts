@@ -1,30 +1,94 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 /**
- * Edge middleware:
- *   - emits a trace id for each request so server logs + client errors
- *     can be joined up
- *   - tags the first-hop client IP for downstream handlers
- *   - redirects unauthenticated requests for protected admin routes
- *     to /admin/login
+ * Edge middleware.
  *
- * Real CSP + per-route rate limiting + Turnstile verify land here in
- * Phase 2 once Upstash + Turnstile are wired up.
+ * Responsibilities:
+ *   - Emit a per-request trace id (joins server logs to client errors).
+ *   - Derive the **trusted** client IP from `x-real-ip` (set by the
+ *     Render / Azure front proxy) and only fall back to the last hop
+ *     of `x-forwarded-for`. Never trust the *first* XFF hop — that one
+ *     is attacker-controllable and will forge-bypass the rate limiter.
+ *   - Gate `/admin/*` (except `/admin/login`) behind the admin cookie.
+ *     Unlike the previous "presence only" check, this now **verifies
+ *     the HMAC** using Web Crypto (Edge-safe). Tampered or forged
+ *     cookies are rejected before the page loads.
  */
 
 const PROTECTED_ADMIN = /^\/admin\/(?!login)(.*)/;
 
-export function middleware(req: NextRequest) {
-  const traceId = crypto.randomUUID();
-  const ip =
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-    req.headers.get("x-real-ip") ??
-    "0.0.0.0";
+/**
+ * Pick the trusted client IP per F-07.
+ * Order of preference:
+ *   1. `x-real-ip` — Render/Azure/CloudFront-style single-source-of-truth
+ *   2. Last hop of `x-forwarded-for` — the hop nearest to our infra;
+ *      the attacker-controllable hops are at the *start* of the list.
+ *   3. "0.0.0.0" if neither is present (shouldn't happen in prod).
+ */
+function trustedClientIp(req: NextRequest): string {
+  const realIp = req.headers.get("x-real-ip")?.trim();
+  if (realIp) return realIp;
+  const xff = req.headers.get("x-forwarded-for");
+  if (xff) {
+    const parts = xff.split(",").map((s) => s.trim()).filter(Boolean);
+    if (parts.length) return parts[parts.length - 1]!;
+  }
+  return "0.0.0.0";
+}
 
-  // Admin gate — cookie presence only; signature verified server-side.
+/**
+ * Edge-safe HMAC-SHA256 verify of `<payload>.<sig>`. Mirrors the
+ * Node-side sign()/decode() in src/server/admin/session.ts using
+ * Web Crypto so it runs in the Edge runtime.
+ */
+async function verifyAdminCookie(raw: string | undefined): Promise<boolean> {
+  if (!raw) return false;
+  const [payload, sig] = raw.split(".");
+  if (!payload || !sig) return false;
+
+  const secret = process.env.ADMIN_SECRET;
+  if (!secret) return false; // fail closed in live mode
+
+  try {
+    const key = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(secret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+    const mac = await crypto.subtle.sign(
+      "HMAC",
+      key,
+      new TextEncoder().encode(payload),
+    );
+    const bytes = new Uint8Array(mac);
+    let bin = "";
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]!);
+    const expected = btoa(bin)
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+    if (expected.length !== sig.length) return false;
+    // Constant-time compare.
+    let diff = 0;
+    for (let i = 0; i < expected.length; i++) {
+      diff |= expected.charCodeAt(i) ^ sig.charCodeAt(i);
+    }
+    return diff === 0;
+  } catch {
+    return false;
+  }
+}
+
+export async function middleware(req: NextRequest) {
+  const traceId = crypto.randomUUID();
+  const ip = trustedClientIp(req);
+
   if (PROTECTED_ADMIN.test(req.nextUrl.pathname)) {
-    const cookie = req.cookies.get("lwh_admin");
-    if (!cookie?.value) {
+    const cookie = req.cookies.get("lwh_admin")?.value;
+    const valid = await verifyAdminCookie(cookie);
+    if (!valid) {
       const url = req.nextUrl.clone();
       url.pathname = "/admin/login";
       url.searchParams.set("next", req.nextUrl.pathname);
@@ -42,5 +106,5 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|brand/).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|brand/|images/).*)"],
 };

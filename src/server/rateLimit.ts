@@ -28,6 +28,14 @@ export const rateLimit = {
   authIp(ip: string) {
     return check(`rl:auth:ip:${ip}`, appConfig.rateLimits.authPerMinPerIp, 60_000);
   },
+  /** Admin login — tighter than portal auth. 5/min/IP. */
+  adminLoginIp(ip: string) {
+    return check(`rl:admin:ip:${ip}`, 5, 60_000);
+  },
+  /** Admin login — per-email sliding window. 5 per hour. */
+  adminLoginEmail(email: string) {
+    return check(`rl:admin:email:${email.toLowerCase()}`, 5, 60 * 60_000);
+  },
   ninValidateEnrollee(enrolleeId: string) {
     return check(
       `rl:nin:enr:${enrolleeId}`,

@@ -1,6 +1,7 @@
 import "server-only";
 import { cookies } from "next/headers";
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { requireAdminBootstrapPassword, requireSecret } from "@/lib/secrets";
 
 /**
  * Dev-only admin session. Phase 2 replaces with NextAuth v5 + Leadway
@@ -8,13 +9,11 @@ import { createHmac, timingSafeEqual } from "node:crypto";
  * by the Phase-4 admin console stub.
  */
 const COOKIE = "lwh_admin";
-const DEV_SECRET = "dev-only-admin-secret";
 
-function secret(): string {
-  return process.env.ADMIN_SECRET || DEV_SECRET;
-}
 function sign(p: string): string {
-  return createHmac("sha256", secret()).update(p).digest("base64url");
+  return createHmac("sha256", requireSecret("ADMIN_SECRET"))
+    .update(p)
+    .digest("base64url");
 }
 
 export interface AdminSession {
@@ -50,7 +49,10 @@ export async function setAdminSession(s: AdminSession): Promise<void> {
   store.set(COOKIE, `${payload}.${sign(payload)}`, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
+    // F-11: strict — there is no legitimate cross-site entry point
+    // into /admin/*, so refuse the cookie on top-level navigations
+    // initiated from other origins.
+    sameSite: "strict",
     path: "/",
     maxAge: 60 * 60 * 4, // 4 h
   });
@@ -62,12 +64,18 @@ export async function clearAdminSession(): Promise<void> {
 }
 
 /**
- * Dev allow-list. Replace with a DB lookup in Phase 2.
- * TODO(client): confirm real admin identities + SSO provider.
+ * Dev allow-list. Replace with a DB lookup + per-admin bcrypt hash in
+ * Phase 2. Uses a timing-safe SHA-256 digest compare so the length or
+ * early-mismatch of the bootstrap password can't be inferred from
+ * response time. Throws in live production if
+ * ADMIN_BOOTSTRAP_PASSWORD is missing.
  */
 export function findDevAdmin(email: string, password: string): AdminSession | null {
-  const want = process.env.ADMIN_BOOTSTRAP_PASSWORD ?? "lwh-admin-dev";
-  if (password !== want) return null;
+  const want = requireAdminBootstrapPassword();
+  const got = createHash("sha256").update(password).digest();
+  const exp = createHash("sha256").update(want).digest();
+  if (got.length !== exp.length) return null;
+  if (!timingSafeEqual(got, exp)) return null;
   return {
     id: `dev-${email}`,
     email,

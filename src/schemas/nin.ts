@@ -7,7 +7,10 @@ export const ninInputSchema = z
   .refine(isValidNinFormat, "NIN must be exactly 11 digits.");
 
 export const beneficiaryNinSubmitSchema = z.object({
-  beneficiaryId: z.string().min(1),
+  // F-13: cap so a malformed / oversized value can't pass through to
+  // the in-memory household lookup. Real enrolleeIds are ~12 chars
+  // (e.g. "21000645/15").
+  beneficiaryId: z.string().min(1).max(40),
   nin: ninInputSchema,
   idempotencyKey: z.string().uuid().optional(),
 });

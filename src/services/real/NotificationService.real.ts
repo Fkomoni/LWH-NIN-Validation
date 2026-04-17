@@ -15,28 +15,46 @@ interface Vars {
   [k: string]: string;
 }
 
+/**
+ * F-09: strip CR/LF (and stray control chars) from any string that
+ * flows into an email subject or is otherwise concatenated with
+ * header-like text. Prevents header injection if an upstream (Qore,
+ * Prognosis) ever returns a name with embedded newlines.
+ */
+function sanitizeHeader(s: string | undefined, max = 200): string {
+  if (!s) return "";
+  return s.replace(/[\r\n\t\u0000-\u001f]+/g, " ").slice(0, max).trim();
+}
+
 function renderOtpSms(vars: Vars): string {
-  return `Your Leadway Health verification code is ${vars.code}. It expires in 5 minutes. Do not share this code.`;
+  return `Your Leadway Health verification code is ${sanitizeHeader(vars.code, 12)}. It expires in 5 minutes. Do not share this code.`;
 }
 
 function renderLockoutEmail(vars: Vars): { subject: string; body: string } {
+  const enrollee = sanitizeHeader(vars.enrolleeId, 40);
   return {
-    subject: `[LWH Portal] Account locked — ${vars.enrolleeId}`,
+    subject: `[LWH Portal] Account locked — ${enrollee}`,
     body: [
-      `Enrollee ID: ${vars.enrolleeId}`,
-      `Channel: ${vars.channel}`,
-      `Attempts in window: ${vars.attempts}`,
-      `Lock duration: ${vars.lockDurationHours}h`,
-      `Timestamp (${appConfig.timezone}): ${vars.when}`,
-      `IP: ${vars.ip}`,
-      `User-Agent: ${vars.userAgent}`,
+      `Enrollee ID: ${enrollee}`,
+      `Channel: ${sanitizeHeader(vars.channel, 20)}`,
+      `Attempts in window: ${sanitizeHeader(vars.attempts, 6)}`,
+      `Lock duration: ${sanitizeHeader(vars.lockDurationHours, 6)}h`,
+      `Timestamp (${appConfig.timezone}): ${sanitizeHeader(vars.when, 60)}`,
+      `IP: ${sanitizeHeader(vars.ip, 45)}`,
+      `User-Agent: ${sanitizeHeader(vars.userAgent, 400)}`,
     ].join("\n"),
   };
 }
 
 function renderValidatedEmail(vars: Vars): { subject: string; body: string } {
-  const principal = vars.principalName ?? vars.fullName ?? "there";
-  const beneficiary = vars.beneficiaryName ?? vars.fullName ?? "this member";
+  const principal = sanitizeHeader(
+    vars.principalName ?? vars.fullName ?? "there",
+    120,
+  );
+  const beneficiary = sanitizeHeader(
+    vars.beneficiaryName ?? vars.fullName ?? "this member",
+    120,
+  );
   return {
     subject: `NIN update successful for ${beneficiary} — Leadway Health`,
     body: [
@@ -57,9 +75,11 @@ function renderValidatedEmail(vars: Vars): { subject: string; body: string } {
 }
 
 function renderFailedEmail(vars: Vars): { subject: string; body: string } {
+  const fullName = sanitizeHeader(vars.fullName ?? "there", 120);
+  const supportRef = sanitizeHeader(vars.supportRef ?? "", 40);
   return {
     subject: `Leadway Health — NIN validation needs attention`,
-    body: `Hi ${vars.fullName},\n\nWe couldn't verify the NIN you submitted. Please contact Leadway Support with reference ${vars.supportRef ?? ""} to complete your NIN update.\n\nLeadway Health`,
+    body: `Hi ${fullName},\n\nWe couldn't verify the NIN you submitted. Please contact Leadway Support with reference ${supportRef} to complete your NIN update.\n\nLeadway Health`,
   };
 }
 

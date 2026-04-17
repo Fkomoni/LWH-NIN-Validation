@@ -50,7 +50,10 @@ export interface NinValidationResult {
 
 export interface AuthSession {
   enrolleeId: string;
+  /** Wall-clock when the session was first issued (bounds absoluteMs). */
   authedAt: string;
+  /** Wall-clock of the last authenticated request (bounds idleMs). */
+  lastSeenAt: string;
   channel: "DOB" | "PRINCIPAL_NIN" | "OTP";
   mocked?: boolean;
 }

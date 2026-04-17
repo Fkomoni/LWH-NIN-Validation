@@ -23,6 +23,11 @@ export function AdminLoginForm() {
           {state.message}
         </p>
       ) : null}
+      {state.status === "rate-limited" ? (
+        <p role="alert" className="text-sm font-medium text-destructive">
+          Too many attempts from this IP or email. Please wait a few minutes and try again.
+        </p>
+      ) : null}
       <div className="flex justify-end">
         <Button type="submit" disabled={pending}>
           {pending ? "Signing in…" : "Sign in"}

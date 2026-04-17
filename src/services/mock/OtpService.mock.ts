@@ -18,10 +18,12 @@ import { recordFail } from "@/server/lockout";
  */
 
 const FIXED_CODE = "123456";
-const HMAC_SECRET = process.env.OTP_HMAC_SECRET ?? "dev-only-otp-pepper";
+import { requireSecret } from "@/lib/secrets";
 
 function codeHash(code: string): string {
-  return createHmac("sha256", HMAC_SECRET).update(code).digest("hex");
+  return createHmac("sha256", requireSecret("OTP_HMAC_SECRET"))
+    .update(code)
+    .digest("hex");
 }
 
 function k(scope: string, enrolleeId: string) {

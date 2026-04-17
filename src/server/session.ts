@@ -12,16 +12,14 @@ import { cookies } from "next/headers";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { AuthSession } from "@/types/domain";
 import { appConfig } from "@/config/app";
+import { requireSecret } from "@/lib/secrets";
 
 const COOKIE_NAME = "lwh_session";
-const DEV_SECRET = "dev-only-secret-do-not-use-in-prod";
-
-function secret(): string {
-  return process.env.AUTH_SECRET || DEV_SECRET;
-}
 
 function sign(payload: string): string {
-  return createHmac("sha256", secret()).update(payload).digest("base64url");
+  return createHmac("sha256", requireSecret("AUTH_SECRET"))
+    .update(payload)
+    .digest("base64url");
 }
 
 function encode(session: AuthSession): string {
@@ -40,9 +38,17 @@ function decode(raw: string): AuthSession | null {
     return null;
   }
   try {
-    const s = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as AuthSession;
-    const age = Date.now() - new Date(s.authedAt).getTime();
-    if (age > appConfig.session.absoluteMs) return null;
+    const s = JSON.parse(
+      Buffer.from(payload, "base64url").toString("utf8"),
+    ) as AuthSession;
+    const now = Date.now();
+    const issued = new Date(s.authedAt).getTime();
+    // Back-compat: existing in-flight sessions minted before F-06 may
+    // not have lastSeenAt; treat them as just-seen to avoid a forced
+    // mass sign-out at deploy. They will be upgraded on next request.
+    const seen = s.lastSeenAt ? new Date(s.lastSeenAt).getTime() : issued;
+    if (now - issued > appConfig.session.absoluteMs) return null; // absolute TTL
+    if (now - seen > appConfig.session.idleMs) return null;         // idle TTL
     return s;
   } catch {
     return null;
@@ -56,15 +62,21 @@ export async function getSession(): Promise<AuthSession | null> {
   return decode(raw);
 }
 
-export async function setSession(session: AuthSession): Promise<void> {
-  const store = await cookies();
-  store.set(COOKIE_NAME, encode(session), {
-    httpOnly: true,
+function cookieOptions() {
+  return {
+    httpOnly: true as const,
     secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
+    // F-12: strict — no legitimate cross-site entry point into the
+    // portal needs the session cookie to ride on top-level navigations.
+    sameSite: "strict" as const,
     path: "/",
     maxAge: Math.floor(appConfig.session.absoluteMs / 1000),
-  });
+  };
+}
+
+export async function setSession(session: AuthSession): Promise<void> {
+  const store = await cookies();
+  store.set(COOKIE_NAME, encode(session), cookieOptions());
 }
 
 export async function clearSession(): Promise<void> {
@@ -72,8 +84,16 @@ export async function clearSession(): Promise<void> {
   store.set(COOKIE_NAME, "", { maxAge: 0, path: "/" });
 }
 
+/**
+ * Get the session AND refresh the `lastSeenAt` watermark so the idle
+ * timeout window slides forward on active use. Called from every
+ * authenticated Server Action via requireSession().
+ */
 export async function requireSession(): Promise<AuthSession> {
   const s = await getSession();
   if (!s) throw new Error("UNAUTHENTICATED");
-  return s;
+  const refreshed: AuthSession = { ...s, lastSeenAt: new Date().toISOString() };
+  const store = await cookies();
+  store.set(COOKIE_NAME, encode(refreshed), cookieOptions());
+  return refreshed;
 }

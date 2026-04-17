@@ -18,10 +18,14 @@ import { log } from "@/lib/logger";
  *     integration, timingSafeEqual verify) is unchanged
  */
 
-const HMAC_SECRET = process.env.OTP_HMAC_SECRET ?? "dev-only-otp-pepper";
+import { requireSecret } from "@/lib/secrets";
+
+function otpPepper(): string {
+  return requireSecret("OTP_HMAC_SECRET");
+}
 
 function codeHash(code: string): string {
-  return createHmac("sha256", HMAC_SECRET).update(code).digest("hex");
+  return createHmac("sha256", otpPepper()).update(code).digest("hex");
 }
 
 function randomCode(len = appConfig.otp.length): string {
