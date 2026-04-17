@@ -12,7 +12,7 @@ services:
     autoDeploy: true
     buildCommand: pnpm install --frozen-lockfile && pnpm exec prisma generate && pnpm build
     startCommand: pnpm start -p $PORT
-    healthCheckPath: /
+    healthCheckPath: /api/healthz
     envVars:
       - key: NODE_VERSION
         value: "22"
