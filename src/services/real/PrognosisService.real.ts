@@ -136,14 +136,25 @@ export const realPrognosisService: PrognosisService = {
       );
 
       const token = await getPrognosisToken();
+
+      // Write endpoints additionally require an API key header.
+      // Live response from Prognosis: { success: false, message: "API Key is missing" }
+      // Default header name is `X-API-Key`; override via PROGNOSIS_API_KEY_HEADER
+      // if Leadway uses a different casing (e.g. `ApiKey`, `api-key`).
+      const apiKey = process.env.PROGNOSIS_API_KEY;
+      const apiKeyHeaderName = process.env.PROGNOSIS_API_KEY_HEADER ?? "X-API-Key";
+
+      const reqHeaders: Record<string, string> = {
+        accept: "application/json",
+        "content-type": "application/json",
+        authorization: `Bearer ${token}`,
+        "Idempotency-Key": payload.txnRef,
+      };
+      if (apiKey) reqHeaders[apiKeyHeaderName] = apiKey;
+
       const res = await fetch(`${base}${PATH}`, {
         method: "POST",
-        headers: {
-          accept: "application/json",
-          "content-type": "application/json",
-          authorization: `Bearer ${token}`,
-          "Idempotency-Key": payload.txnRef,
-        },
+        headers: reqHeaders,
         body: JSON.stringify(body),
       });
       const parsed = (await res.json().catch(() => null)) as UpdateMemberDataResponse | null;

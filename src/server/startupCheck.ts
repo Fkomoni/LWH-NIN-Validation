@@ -55,7 +55,13 @@ export function runStartupCheck(): void {
     );
   }
 
-  // PROGNOSIS_NIN_UPDATE_PATH is optional — default is the confirmed
-  // /EnrolleeProfile/UpdateMemberData path. Only warn if the operator
-  // overrode it to an obviously wrong value.
+  // The write endpoint needs an API key in addition to the bearer token;
+  // without it Prognosis responds with 401 "API Key is missing" and we
+  // non-retryably fail the write. Warn loudly at boot.
+  if (!process.env.PROGNOSIS_API_KEY) {
+    log.warn(
+      {},
+      "startup.missing-prognosis-api-key: set PROGNOSIS_API_KEY (and PROGNOSIS_API_KEY_HEADER if the header isn't X-API-Key) to enable /EnrolleeProfile/UpdateMemberData; reads will still work but writes will 401.",
+    );
+  }
 }

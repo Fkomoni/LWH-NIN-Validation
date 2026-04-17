@@ -49,8 +49,14 @@ QORE_SECRET_KEY        = <provided by Qore>
 ```
 PROGNOSIS_USERNAME           = <Leadway API user>
 PROGNOSIS_PASSWORD           = <Leadway API password>
-PROGNOSIS_NIN_UPDATE_PATH    = <optional — client to confirm>
+PROGNOSIS_API_KEY            = <required for write endpoints>
+PROGNOSIS_API_KEY_HEADER     = <only if not "X-API-Key">
 ```
+
+The bearer token from `/ApiUsers/Login` is enough for the READ endpoints
+(`GetEnrolleeBioDataByEnrolleeID`, `GetEnrolleeDependantsByEnrolleeID`).
+The WRITE endpoint (`UpdateMemberData`) additionally requires an API key
+header. Without it Prognosis responds `401 "API Key is missing"`.
 
 ### Admin bootstrap
 ```

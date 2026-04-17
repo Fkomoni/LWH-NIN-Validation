@@ -45,6 +45,12 @@ services:
         sync: false
       - key: PROGNOSIS_PASSWORD
         sync: false
+      # Write endpoints need an API key in addition to the bearer token.
+      - key: PROGNOSIS_API_KEY
+        sync: false
+      # Leave unset to use the default header name "X-API-Key".
+      - key: PROGNOSIS_API_KEY_HEADER
+        sync: false
       # Optional Phase-2 extras
       - key: TURNSTILE_SITE_KEY
         sync: false
