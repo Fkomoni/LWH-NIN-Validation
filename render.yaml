@@ -62,6 +62,10 @@ services:
 databases:
   - name: lwh-nin-pg
     databaseName: lwh_nin
-    plan: starter
+    # Render retired the legacy "starter" DB tier in 2026. Use the
+    # cheapest current paid tier for stability; upgrade later from the
+    # dashboard without redeploying. Other options: basic-1gb, basic-4gb,
+    # pro-4gb, pro-8gb, pro-16gb, pro-32gb.
+    plan: basic-256mb
     region: oregon
     ipAllowList: []
