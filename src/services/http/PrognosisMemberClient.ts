@@ -28,7 +28,8 @@ export interface PrognosisMember {
   phone?: string;
   gender?: string;
   relationship?: string;
-  ninStatus?: string;
+  /** Raw NIN if Prognosis already has one on file. */
+  existingNin?: string;
 }
 
 type Body = Record<string, unknown>;
@@ -53,6 +54,19 @@ function normaliseDob(raw?: string): string | undefined {
 }
 
 function fullNameFromBody(b: Body): string | undefined {
+  // Prognosis returns the concatenated name as `Member_CustomerName`.
+  // Fall through to FirstName + othernames + Surname if that field is
+  // absent, then finally to the generic Name / FullName casings.
+  const customer = str(b, ["Member_CustomerName", "CustomerName"]);
+  if (customer) return customer;
+
+  const prognosisParts = [
+    str(b, ["Member_FirstName"]),
+    str(b, ["Member_othernames", "Member_OtherNames", "Member_MiddleName"]),
+    str(b, ["Member_Surname", "Member_LastName"]),
+  ].filter(Boolean);
+  if (prognosisParts.length) return prognosisParts.join(" ");
+
   const direct = str(b, ["FullName", "fullName", "full_name", "Name", "name"]);
   if (direct) return direct;
   const first = str(b, ["FirstName", "firstname", "firstName", "Firstname"]);
@@ -67,22 +81,48 @@ function mapMember(b: Body, fallbackId: string): PrognosisMember | null {
   if (!fullName) return null;
   return {
     enrolleeId:
-      str(b, ["EnrolleeID", "enrolleeId", "EnrolleeId", "enrolleeid", "Enrolleeid"]) ??
-      fallbackId,
+      str(b, [
+        "Member_EnrolleeID",
+        "EnrolleeID",
+        "enrolleeId",
+        "EnrolleeId",
+        "enrolleeid",
+        "Enrolleeid",
+      ]) ?? fallbackId,
     fullName,
-    dob: normaliseDob(str(b, ["DateOfBirth", "dateOfBirth", "DOB", "dob", "BirthDate"])),
+    dob: normaliseDob(
+      str(b, [
+        "Member_DateOfBirth",
+        "DateOfBirth",
+        "dateOfBirth",
+        "DOB",
+        "dob",
+        "BirthDate",
+      ]),
+    ),
+    // Prognosis carries up to five phone slots; the first non-empty wins.
     phone: str(b, [
+      "Member_Phone_One",
+      "Member_Phone_Two",
+      "Member_Phone_Three",
+      "Member_Phone_Four",
+      "Member_Phone_Five",
       "Phone",
       "phone",
       "PhoneNumber",
-      "PHoneNumber", // Prognosis ships this exact casing
+      "PHoneNumber", // NIN-update request body ships this exact casing
       "phoneNumber",
       "MobileNumber",
       "mobileNumber",
     ]),
-    gender: str(b, ["Gender", "gender", "Sex", "sex"]),
-    relationship: str(b, ["Relationship", "relationship"]),
-    ninStatus: str(b, ["NinStatus", "ninStatus", "NINStatus"]),
+    gender: str(b, ["Member_Gender", "Gender", "gender", "Sex", "sex"]),
+    relationship: str(b, [
+      "Member_RelationshipToPrincipal",
+      "RelationshipToPrincipal",
+      "Relationship",
+      "relationship",
+    ]),
+    existingNin: str(b, ["NIN", "Member_NIN", "nin"]),
   };
 }
 

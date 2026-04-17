@@ -32,6 +32,7 @@ function relationshipFromString(raw?: string): Relationship {
 }
 
 function toPerson(p: PrognosisMember, isPrincipal: boolean): Person {
+  const hasNin = Boolean(p.existingNin && p.existingNin.length >= 3);
   return {
     id: p.enrolleeId,
     enrolleeId: p.enrolleeId,
@@ -39,7 +40,10 @@ function toPerson(p: PrognosisMember, isPrincipal: boolean): Person {
     relationship: isPrincipal ? "PRINCIPAL" : relationshipFromString(p.relationship),
     dob: p.dob ?? "",
     phoneMasked: p.phone ? maskPhone(p.phone) : undefined,
-    ninStatus: "NOT_SUBMITTED",
+    // If Prognosis already holds a NIN for this member, show them as
+    // already validated; the UI will disable the input row.
+    ninStatus: hasNin ? "UPDATED" : "NOT_SUBMITTED",
+    ninLast3: hasNin && p.existingNin ? p.existingNin.slice(-3) : undefined,
   };
 }
 
