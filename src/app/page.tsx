@@ -3,32 +3,42 @@ import { PageShell } from "@/components/layout/PageShell";
 import { Button } from "@/components/ui/button";
 import { ConsentBanner } from "@/components/layout/ConsentBanner";
 import { SupportBlock } from "@/components/layout/SupportBlock";
+import { HeroArt } from "./HeroArt";
 
 export default function LandingPage() {
   return (
     <PageShell>
-      <div className="space-y-8">
-        <section className="space-y-3">
-          <p className="text-sm font-semibold uppercase tracking-wide text-primary">
-            NIN update
-          </p>
-          <h1 className="text-3xl font-bold leading-tight md:text-4xl">
-            Link your NIN to your Leadway Health plan
-          </h1>
-          <p className="max-w-2xl text-base text-muted-foreground">
-            As part of NHIA's updated requirements, we need the National
-            Identity Number (NIN) of every member on your plan. It takes about
-            two minutes, and you can do it for everyone in one go.
-          </p>
-          <div className="pt-2">
-            <Button asChild size="lg">
-              <Link href="/auth">Start NIN update</Link>
-            </Button>
+      <div className="space-y-10">
+        {/* ── Hero ───────────────────────────────────────────────── */}
+        <section className="grid items-center gap-8 md:grid-cols-[1.1fr_1fr]">
+          <div className="space-y-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary">
+              NIN update
+            </p>
+            <h1 className="text-3xl font-bold leading-tight md:text-4xl">
+              Link your NIN to your Leadway Health plan
+            </h1>
+            <p className="max-w-xl text-base text-muted-foreground md:text-lg">
+              As part of NHIA&apos;s updated requirements, we need the National
+              Identity Number (NIN) of every member on your plan. It takes
+              about two minutes, and you can do it for everyone in one go.
+            </p>
+            <div className="flex flex-wrap items-center gap-3 pt-2">
+              <Button asChild size="lg">
+                <Link href="/auth">Start NIN update</Link>
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                Takes about 2 minutes · secure &amp; NDPA-compliant
+              </span>
+            </div>
           </div>
+
+          <HeroArt />
         </section>
 
         <ConsentBanner />
 
+        {/* ── Steps ─────────────────────────────────────────────── */}
         <section className="grid gap-4 md:grid-cols-3">
           {[
             {
@@ -44,7 +54,8 @@ export default function LandingPage() {
             {
               n: "3",
               title: "Submit NINs",
-              body: "Validate each NIN against NIMC — we'll take care of updating our records.",
+              body:
+                "Validate each NIN against NIMC — we'll take care of updating our records.",
             },
           ].map((s) => (
             <div key={s.n} className="rounded-lg border p-4">

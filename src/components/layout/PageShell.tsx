@@ -8,9 +8,9 @@ export function PageShell({ children }: { children: React.ReactNode }) {
         Skip to main content
       </a>
       <header className="border-b bg-background">
-        <div className="container flex h-16 items-center justify-between">
+        <div className="container flex h-20 items-center justify-between">
           <Link href="/" aria-label="Leadway Health home">
-            <Logo className="h-9 w-auto" />
+            <Logo className="h-14 w-auto" />
           </Link>
           <nav className="text-sm text-muted-foreground">
             <Link href="/auth" className="underline-offset-2 hover:underline">
