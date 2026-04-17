@@ -6,9 +6,8 @@ import { Button } from "@/components/ui/button";
 import { RadioGroup, RadioItem } from "@/components/ui/radio";
 import { Label } from "@/components/ui/label";
 import { PrincipalNinForm } from "./PrincipalNinForm";
-import { OtpPanel } from "./OtpPanel";
 
-type Choice = "retry" | "principal-nin" | "otp";
+type Choice = "retry" | "principal-nin";
 
 export function VerifyChooser({ enrolleeId }: { enrolleeId: string }) {
   const [choice, setChoice] = useState<Choice>("retry");
@@ -29,12 +28,7 @@ export function VerifyChooser({ enrolleeId }: { enrolleeId: string }) {
           {
             v: "principal-nin",
             t: "Validate with my NIN",
-            d: "We'll check your NIN with NIMC and match it against the date of birth you entered.",
-          },
-          {
-            v: "otp",
-            t: "Send an OTP to my phone",
-            d: "We'll send a 6-digit code to the phone number on file.",
+            d: "We'll check your NIN with NIMC and match it against the date of birth you entered. If it matches, we'll update our records with your NIN and continue to your dependants.",
           },
         ].map((o) => (
           <label
@@ -64,8 +58,6 @@ export function VerifyChooser({ enrolleeId }: { enrolleeId: string }) {
       {choice === "principal-nin" ? (
         <PrincipalNinForm enrolleeId={enrolleeId} />
       ) : null}
-
-      {choice === "otp" ? <OtpPanel enrolleeId={enrolleeId} /> : null}
     </div>
   );
 }

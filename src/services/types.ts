@@ -56,6 +56,28 @@ export interface NinService {
     nin: string;
     idempotencyKey: string;
   }): Promise<NinValidationResult>;
+
+  /**
+   * Verify a principal's NIN for the auth-via-NIN fallback.
+   *
+   * Compares NIMC's DOB against the DOB the user typed into the form
+   * (NOT against Prognosis's record — the whole point of this flow is
+   * cases where Prognosis's DOB is wrong). Name is cross-checked
+   * against the Prognosis principal's full name for identity.
+   */
+  verifyForAuth(input: {
+    nin: string;
+    providedDob: string;
+    expectedFullName: string;
+    traceId: string;
+  }): Promise<{
+    match: boolean;
+    verifiedFullName?: string;
+    dobFromNin?: string;
+    nameScore?: number;
+    dobMatched?: boolean;
+    message: string;
+  }>;
 }
 
 /* ─── PrognosisService ────────────────────────────────────────────────── */

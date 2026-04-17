@@ -3,6 +3,7 @@ import type { NinService } from "../types";
 import type { NinValidationResult } from "@/types/domain";
 import { verifyNin } from "../http/NimcClient";
 import { households } from "@/fixtures/households";
+import { nimcFixtures } from "@/fixtures/nimc";
 import { isValidNinFormat } from "@/lib/validation/nin";
 import { scoreNameMatch } from "@/lib/validation/scoreName";
 import { dobMatches } from "@/lib/validation/dob";
@@ -59,7 +60,8 @@ export const mockNinService: NinService = {
     if (nimc.status === "NOT_FOUND") {
       const r: NinValidationResult = {
         outcome: "FAIL_HARD",
-        message: "We couldn't verify this NIN with NIMC. Please double-check and try again.",
+        message:
+          "We couldn't verify this NIN with NIMC. Please contact Leadway Support so we can update your record manually.",
         supportRef: supportRef(),
       };
       idempotencyStore.set(idempotencyKey, r);
@@ -87,7 +89,8 @@ export const mockNinService: NinService = {
         dobMatched: false,
         verifiedFullName: nimc.fullName,
         dobFromNin: nimc.dob,
-        message: "The date of birth on this NIN doesn't match our records.",
+        message:
+          "The date of birth on this NIN doesn't match our records. Please contact Leadway Support so we can update your record manually.",
         supportRef: supportRef(),
       };
     } else if (tier === "auto-pass") {
@@ -127,12 +130,54 @@ export const mockNinService: NinService = {
         dobMatched: true,
         verifiedFullName: nimc.fullName,
         dobFromNin: nimc.dob,
-        message: "The name on this NIN doesn't match our records.",
+        message:
+          "The name on this NIN doesn't match our records. Please contact Leadway Support so we can update your record manually.",
         supportRef: supportRef(),
       };
     }
 
     idempotencyStore.set(idempotencyKey, result);
     return result;
+  },
+
+  async verifyForAuth({ nin, providedDob, expectedFullName }) {
+    if (!isValidNinFormat(nin)) {
+      return { match: false, message: "NIN must be exactly 11 digits." };
+    }
+    const fixture = nimcFixtures[nin];
+    if (!fixture || fixture.outcome === "NOT_FOUND") {
+      return {
+        match: false,
+        message:
+          "We couldn't verify this NIN with NIMC. Please contact Leadway Support for manual assistance.",
+      };
+    }
+    if (fixture.outcome === "TIMEOUT" || fixture.outcome === "PROVIDER_ERROR") {
+      return {
+        match: false,
+        message: "NIMC is temporarily unavailable. Please try again in a moment.",
+      };
+    }
+    const dobMatched = fixture.dob ? dobMatches(providedDob, fixture.dob) : false;
+    const { score } = scoreNameMatch(expectedFullName, fixture.fullName ?? "");
+    if (!dobMatched) {
+      return {
+        match: false,
+        dobMatched: false,
+        nameScore: score,
+        verifiedFullName: fixture.fullName,
+        dobFromNin: fixture.dob,
+        message:
+          "The date of birth you entered doesn't match the one on your NIN. Please check and try again.",
+      };
+    }
+    return {
+      match: score >= 0.4,
+      dobMatched: true,
+      nameScore: score,
+      verifiedFullName: fixture.fullName,
+      dobFromNin: fixture.dob,
+      message: score >= 0.4 ? "NIN verified." : "Name mismatch — please contact Leadway Support.",
+    };
   },
 };

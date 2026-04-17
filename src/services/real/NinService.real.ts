@@ -30,7 +30,10 @@ export const realNinService: NinService = {
     if (cached) return cached;
 
     if (!isValidNinFormat(nin)) {
-      return { outcome: "FAIL_HARD", message: "NIN must be exactly 11 digits." };
+      return {
+        outcome: "FAIL_HARD",
+        message: "NIN must be exactly 11 digits.",
+      };
     }
 
     const svc = getServices();
@@ -59,7 +62,8 @@ export const realNinService: NinService = {
     if (resp.status === "NOT_FOUND") {
       const r: NinValidationResult = {
         outcome: "FAIL_HARD",
-        message: "We couldn't verify this NIN with NIMC. Please double-check and try again.",
+        message:
+          "We couldn't verify this NIN with NIMC. Please contact Leadway Support so we can update your record manually.",
         supportRef: supportRef(),
       };
       await kv.set(idemKey(idempotencyKey), r, { ttlMs: 24 * 60 * 60 * 1000 });
@@ -97,7 +101,8 @@ export const realNinService: NinService = {
         dobMatched: false,
         verifiedFullName: resp.fullName,
         dobFromNin: resp.dob,
-        message: "The date of birth on this NIN doesn't match our records.",
+        message:
+          "The date of birth on this NIN doesn't match our records. Please contact Leadway Support so we can update your record manually.",
         supportRef: supportRef(),
       };
     } else if (tier === "auto-pass") {
@@ -134,12 +139,86 @@ export const realNinService: NinService = {
         dobMatched: true,
         verifiedFullName: resp.fullName,
         dobFromNin: resp.dob,
-        message: "The name on this NIN doesn't match our records.",
+        message:
+          "The name on this NIN doesn't match our records. Please contact Leadway Support so we can update your record manually.",
         supportRef: supportRef(),
       };
     }
 
     await kv.set(idemKey(idempotencyKey), result, { ttlMs: 24 * 60 * 60 * 1000 });
     return result;
+  },
+
+  async verifyForAuth({ nin, providedDob, expectedFullName, traceId: tid }) {
+    if (!isValidNinFormat(nin)) {
+      return { match: false, message: "NIN must be exactly 11 digits." };
+    }
+
+    const { firstname, lastname } = splitFullName(expectedFullName);
+    const call = await qoreVerifyNin({ nin, firstname, lastname, traceId: tid });
+    if (!call.ok) {
+      return {
+        match: false,
+        message: "NIMC is temporarily unavailable. Please try again in a moment.",
+      };
+    }
+
+    const resp = call.data;
+    if (resp.status === "NOT_FOUND") {
+      return {
+        match: false,
+        message:
+          "We couldn't verify this NIN with NIMC. Please contact Leadway Support for manual assistance.",
+      };
+    }
+
+    const dobMatched = resp.dob ? dobMatches(providedDob, resp.dob) : false;
+    const { score } = scoreNameMatch(expectedFullName, resp.fullName ?? "");
+    const nameOk = score >= 0.4; // loose identity sanity-check (below manual-review floor)
+
+    log.info(
+      {
+        expectedName: maskName(expectedFullName),
+        qoreName: resp.fullName ? maskName(resp.fullName) : null,
+        providedDate: providedDob,
+        qoreDate: resp.dob ?? null,
+        nameScore: score,
+        dobMatched,
+        nameOk,
+      },
+      "nin.verifyForAuth.compare",
+    );
+
+    if (!dobMatched) {
+      return {
+        match: false,
+        dobMatched: false,
+        nameScore: score,
+        verifiedFullName: resp.fullName,
+        dobFromNin: resp.dob,
+        message:
+          "The date of birth you entered doesn't match the one on your NIN. Please check and try again, or contact Leadway Support.",
+      };
+    }
+    if (!nameOk) {
+      return {
+        match: false,
+        dobMatched: true,
+        nameScore: score,
+        verifiedFullName: resp.fullName,
+        dobFromNin: resp.dob,
+        message:
+          "The name on this NIN doesn't look like yours on our records. Please double-check and try again, or contact Leadway Support.",
+      };
+    }
+
+    return {
+      match: true,
+      dobMatched: true,
+      nameScore: score,
+      verifiedFullName: resp.fullName,
+      dobFromNin: resp.dob,
+      message: "NIN verified.",
+    };
   },
 };

@@ -31,7 +31,12 @@ export function PrincipalNinForm({ enrolleeId }: { enrolleeId: string }) {
 
       {state.status === "fail" ? (
         <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">
-          We couldn't verify those details. Please double-check and try again.
+          {state.message ?? "We couldn't verify those details. Please double-check and try again."}
+        </p>
+      ) : null}
+      {state.status === "rate-limited" ? (
+        <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">
+          Too many attempts. Please wait a minute and try again.
         </p>
       ) : null}
       {state.status === "locked" ? (

@@ -2,14 +2,18 @@
 
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { authStartSchema, principalNinSchema } from "@/schemas/auth";
 import { getServices } from "@/services";
+import type { PrognosisUpdatePayload } from "@/services/types";
 import { setSession } from "@/server/session";
 import { audit } from "@/server/audit";
-import { traceId } from "@/lib/ids";
+import { traceId, txnRef } from "@/lib/ids";
 import { rateLimit } from "@/server/rateLimit";
 import { isLocked, recordFail, clearFailures } from "@/server/lockout";
 import { notifyLockout } from "@/server/notify";
+import { enqueuePrognosis } from "@/server/outbox";
+import { appConfig } from "@/config/app";
 
 export type AuthStartState =
   | { status: "idle" }
@@ -120,10 +124,23 @@ export async function authStart(
 export type PrincipalNinState =
   | { status: "idle" }
   | { status: "error"; message: string; fieldErrors?: Record<string, string> }
-  | { status: "fail" }
+  | { status: "fail"; message?: string }
   | { status: "locked" }
   | { status: "rate-limited" };
 
+/**
+ * Validate-with-NIN fallback.
+ *
+ * Called from the /verify page when the user's DOB didn't match their
+ * Prognosis record. We:
+ *   1. Load the principal's bio from Prognosis (for the expected name).
+ *   2. Call NIMC (Qore) with the supplied NIN + name.
+ *   3. Compare NIMC's DOB against the USER's entered DOB (not
+ *      Prognosis's — that's the field in question).
+ *   4. If both DOB matches and name is close enough → authenticate.
+ *   5. Fire the principal's NIN into Prognosis in the background (the
+ *      household page will show the dependants for per-row update).
+ */
 export async function authByPrincipalNin(
   _prev: PrincipalNinState,
   formData: FormData,
@@ -150,9 +167,29 @@ export async function authByPrincipalNin(
   if (await isLocked(parsed.data.enrolleeId)) return { status: "locked" };
 
   const svc = getServices();
-  const res = await svc.member.authenticateByPrincipalNin({ ...parsed.data, ip, userAgent: ua });
 
-  if (!res.ok) {
+  // 1. Load the principal's bio so we know the expected name for
+  //    the NIMC name-match sanity check.
+  let household;
+  try {
+    household = await svc.member.loadHousehold(parsed.data.enrolleeId);
+  } catch {
+    return {
+      status: "error",
+      message: "We couldn't reach our records. Please try again in a minute.",
+    };
+  }
+  const principal = household.principal;
+
+  // 2+3. Verify the NIN with NIMC against the user's own DOB.
+  const verify = await svc.nin.verifyForAuth({
+    nin: parsed.data.nin,
+    providedDob: parsed.data.dob,
+    expectedFullName: principal.fullName,
+    traceId: tid,
+  });
+
+  if (!verify.match) {
     const outcome = await recordFail({
       enrolleeId: parsed.data.enrolleeId,
       channel: "PRINCIPAL_NIN",
@@ -176,7 +213,7 @@ export async function authByPrincipalNin(
       });
       return { status: "locked" };
     }
-    return { status: "fail" };
+    return { status: "fail", message: verify.message };
   }
 
   await clearFailures(parsed.data.enrolleeId);
@@ -184,8 +221,40 @@ export async function authByPrincipalNin(
     enrolleeId: parsed.data.enrolleeId,
     authedAt: new Date().toISOString(),
     channel: "PRINCIPAL_NIN",
-    mocked: true,
+    mocked: appConfig.mocksEnabled,
   });
+
+  // 5. Fire the Prognosis write for the principal's NIN. Uses the same
+  //    outbox + after() pattern as per-row submissions so the response
+  //    to the user returns immediately and the write runs in background.
+  if (verify.verifiedFullName && verify.dobFromNin) {
+    const payload: PrognosisUpdatePayload = {
+      memberId: principal.id,
+      nin: parsed.data.nin,
+      verifiedFullName: verify.verifiedFullName,
+      dobFromNin: verify.dobFromNin,
+      validationStatus: "VALIDATED",
+      validatedAt: new Date().toISOString(),
+      source: "self-service-portal",
+      txnRef: txnRef(),
+    };
+    await enqueuePrognosis(payload);
+    after(async () => {
+      try {
+        const write = await svc.prognosis.upsertMemberNin(payload);
+        await audit({
+          action: `prognosis.upsert.${write.ok ? "ok" : "fail"}`,
+          actorType: "system",
+          memberId: principal.id,
+          traceId: tid,
+          payload: { txnRef: payload.txnRef },
+        });
+      } catch {
+        /* outbox drain will retry */
+      }
+    });
+  }
+
   await audit({
     action: "auth.principalNin.success",
     actorType: "portal-user",
