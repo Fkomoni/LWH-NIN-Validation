@@ -24,6 +24,8 @@ jobs:
           cache: pnpm
       - name: Install deps
         run: pnpm install --frozen-lockfile
+      - name: Prisma generate
+        run: pnpm exec prisma generate --schema=prisma/schema.prisma
       - name: Lint
         run: pnpm lint
       - name: Typecheck

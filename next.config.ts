@@ -5,6 +5,9 @@ const nextConfig: NextConfig = {
   experimental: {
     typedRoutes: true,
   },
+  // MSW ships Node-only subpath exports that webpack refuses to bundle.
+  // Only used when NEXT_PUBLIC_MOCKS_ENABLED !== "false" (Phase 1).
+  serverExternalPackages: ["msw", "@mswjs/interceptors"],
   async headers() {
     // Strict security headers. CSP is intentionally conservative for the
     // static-rendered marketing + portal shell; relax via middleware if a
