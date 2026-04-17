@@ -137,18 +137,17 @@ export const realPrognosisService: PrognosisService = {
 
       const token = await getPrognosisToken();
 
-      // Writes use the SAME auth as reads by default:
-      //   Authorization: Bearer <login token>
-      //
-      // Reads work with just this — client has confirmed via Postman
-      // that hitting the read endpoint with only Authorization: Bearer
-      // <jwt> returns 200. The write endpoint should behave the same.
-      //
-      // If the write endpoint needs an additional header (e.g. the
-      // gateway 401 "API Key is missing" suggests it might), set:
-      //   PROGNOSIS_API_KEY_HEADER  header name other than Authorization
-      //   PROGNOSIS_API_KEY         static value (else uses dynamic token)
-      //   PROGNOSIS_API_KEY_BEARER  "false" to drop the Bearer prefix
+      // Write endpoint's JWT validator does NOT strip a "Bearer "
+      // prefix — sending `Authorization: Bearer <jwt>` causes it to
+      // try to parse `Bearer eyJh…` as a compact JWT and fail with
+      //   IDX12709: CanReadToken() returned false. JWT is not well formed.
+      // Reads DO strip the prefix (GetEnrolleeBioDataByEnrolleeID
+      // succeeds with Bearer-prefixed value), so this is a write-only
+      // quirk. Default to raw; flip PROGNOSIS_WRITE_AUTH_BEARER=true
+      // to restore the prefix if Leadway changes the gateway later.
+      const useBearer = process.env.PROGNOSIS_WRITE_AUTH_BEARER === "true";
+      const authValue = useBearer ? `Bearer ${token}` : token;
+
       const envHeader = process.env.PROGNOSIS_API_KEY_HEADER;
       const wantsSecondary =
         !!envHeader &&
@@ -159,16 +158,16 @@ export const realPrognosisService: PrognosisService = {
       const headers = new Headers();
       headers.set("accept", "application/json");
       headers.set("content-type", "application/json");
-      headers.set("Authorization", `Bearer ${token}`);
+      headers.set("Authorization", authValue);
       headers.set("Idempotency-Key", payload.txnRef);
 
       let keyHeaderName: string | null = null;
       if (wantsSecondary) {
         keyHeaderName = envHeader!;
-        const useBearer = (process.env.PROGNOSIS_API_KEY_BEARER ?? "true") !== "false";
+        const secondaryBearer =
+          (process.env.PROGNOSIS_API_KEY_BEARER ?? "true") !== "false";
         const rawValue = process.env.PROGNOSIS_API_KEY ?? token;
-        const apiKeyValue = useBearer ? `Bearer ${rawValue}` : rawValue;
-        headers.set(keyHeaderName, apiKeyValue);
+        headers.set(keyHeaderName, secondaryBearer ? `Bearer ${rawValue}` : rawValue);
       }
 
       log.info(
@@ -178,9 +177,8 @@ export const realPrognosisService: PrognosisService = {
           headerNames: [...headers.keys()],
           authorizationLen: headers.get("Authorization")?.length ?? 0,
           authorizationHead: headers.get("Authorization")?.slice(0, 12) ?? null,
+          authUsesBearer: useBearer,
           keyHeader: keyHeaderName,
-          envOverrideIgnored:
-            Boolean(envHeader) && envHeader?.toLowerCase() === "authorization",
         },
         "prognosis.update.headers",
       );
