@@ -30,12 +30,12 @@ Using Prognosis read endpoints above. Enrollee ID format is `NNNNNNNN/N`
 ### A4. Messaging — ✅ resolved (Prognosis SMS + Email APIs)
 - SMS: `POST {base}/Sms/SendSms`, body
   `{To, Message, Source, SourceId, TemplateId, PolicyNumber, ReferenceNo, UserId}`
-- Email: `POST {base}/Email/SendEmail` (path assumed; body confirmed)
+- Email: `POST {base}/EnrolleeProfile/SendEmailAlert`, body
   `{EmailAddress, CC, BCC, Subject, MessageBody, Attachments, Category,
     UserId, ProviderId, ServiceId, Reference, TransactionType}`
 - Implemented in `src/services/http/PrognosisNotifyClient.ts`.
-- ⚠️ Minor: please confirm the exact Email path and the correct
-  `TemplateId` for the OTP SMS.
+- ⚠️ Minor: please confirm the correct `TemplateId` for the OTP SMS
+  (currently 5).
 
 ---
 
@@ -90,7 +90,7 @@ Using Prognosis read endpoints above. Enrollee ID format is `NNNNNNNN/N`
 
 1. Prognosis **NIN-update** endpoint + payload field names (A2).
 2. Exact support phone / email / hours for the always-visible
-   support-block component (C1).
-3. Prognosis **Email endpoint** path confirmation (A4 minor).
+   support-block component (C1) — **client will supply later**.
+3. Prognosis OTP SMS `TemplateId` confirmation (A4 minor).
 4. Decision on Upstash Redis vs. sticking with in-memory KV on Render
    single-instance (E3).

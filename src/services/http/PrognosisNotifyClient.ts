@@ -5,19 +5,17 @@ import { log } from "@/lib/logger";
 /**
  * Prognosis notification clients.
  *
- * Confirmed endpoints (Apr 2026):
+ * Confirmed endpoints (17 Apr 2026):
  *   POST {BASE}/Sms/SendSms
  *     { To, Message, Source, SourceId, TemplateId, PolicyNumber, ReferenceNo, UserId }
- *   POST {BASE}/Email/SendEmail (path assumed; body shape confirmed)
+ *   POST {BASE}/EnrolleeProfile/SendEmailAlert
  *     { EmailAddress, CC, BCC, Subject, MessageBody, Attachments, Category,
  *       UserId, ProviderId, ServiceId, Reference, TransactionType }
  *
- * TODO(client): confirm the Email endpoint path (the sample showed the
- * body but not the URL — we've assumed `/Email/SendEmail` which is the
- * Prognosis convention). Flip the constant below if different.
+ * TODO(client): confirm the correct `TemplateId` for OTP SMS (currently 5).
  */
 
-const EMAIL_PATH = "/Email/SendEmail";
+const EMAIL_PATH = "/EnrolleeProfile/SendEmailAlert";
 
 async function authedPost<T = unknown>(path: string, body: unknown): Promise<T | null> {
   const base = process.env.PROGNOSIS_BASE_URL;
