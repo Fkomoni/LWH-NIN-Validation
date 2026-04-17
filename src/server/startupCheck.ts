@@ -55,8 +55,15 @@ export function runStartupCheck(): void {
     );
   }
 
-  // PROGNOSIS_API_KEY + PROGNOSIS_API_KEY_HEADER are both optional.
-  // When absent we forward the dynamically-issued bearer token as the
-  // X-API-Key value, matching the client's confirmed auth model (the
-  // "key" is the login-issued token that rotates every 6 hours).
+  // The write endpoint (/EnrolleeProfile/UpdateMemberData) is behind an
+  // API-gateway check separate from /ApiUsers/Login. Without
+  // PROGNOSIS_API_KEY, every write will 401 "API Key is missing".
+  // Reads are unaffected, so we only warn — the landing page and
+  // health check stay up.
+  if (!process.env.PROGNOSIS_API_KEY) {
+    log.warn(
+      {},
+      "startup.missing-prognosis-api-key: writes to /EnrolleeProfile/UpdateMemberData will fail. Set PROGNOSIS_API_KEY (and PROGNOSIS_API_KEY_HEADER if the header name isn't X-API-Key) with the key Leadway provisioned for this API user.",
+    );
+  }
 }

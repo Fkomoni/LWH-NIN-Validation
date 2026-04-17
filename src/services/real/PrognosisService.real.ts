@@ -137,27 +137,28 @@ export const realPrognosisService: PrognosisService = {
 
       const token = await getPrognosisToken();
 
-      // The write endpoint returns 401 "API Key is missing" when only
-      // the Authorization header is present. Per the client (17 Apr 2026),
-      // the "API key" for API users IS the same dynamic token issued by
-      // /ApiUsers/Login (6-hour lifetime, auto-rotated — the user has
-      // only Base URL + Username + Password, no static key).
+      // Write endpoints sit behind an API-gateway check that is
+      // separate from the /ApiUsers/Login bearer token.
       //
-      // So we send the SAME token on both `Authorization: Bearer <token>`
-      // AND the secondary gateway header. Header name defaults to
-      // "X-API-Key"; override via PROGNOSIS_API_KEY_HEADER if needed.
-      // PROGNOSIS_API_KEY (a static override value) is supported for
-      // forward compatibility but is NOT required in day-one mode.
+      // Live evidence (17 Apr 2026):
+      //   no X-API-Key header        → "API Key is missing"
+      //   X-API-Key = bearer token   → "Invalid API Key"
+      //
+      // So the gateway really wants a distinct static key (or a
+      // separately-scoped token). Leadway must provision it for this
+      // API user. Set the value via PROGNOSIS_API_KEY; override the
+      // header name via PROGNOSIS_API_KEY_HEADER if Leadway uses a
+      // different casing. Without the key set, the write will 401.
+      const apiKeyValue = process.env.PROGNOSIS_API_KEY;
       const apiKeyHeaderName = process.env.PROGNOSIS_API_KEY_HEADER ?? "X-API-Key";
-      const apiKeyValue = process.env.PROGNOSIS_API_KEY ?? token;
 
       const reqHeaders: Record<string, string> = {
         accept: "application/json",
         "content-type": "application/json",
         authorization: `Bearer ${token}`,
-        [apiKeyHeaderName]: apiKeyValue,
         "Idempotency-Key": payload.txnRef,
       };
+      if (apiKeyValue) reqHeaders[apiKeyHeaderName] = apiKeyValue;
 
       const res = await fetch(`${base}${PATH}`, {
         method: "POST",

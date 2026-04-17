@@ -49,18 +49,31 @@ QORE_SECRET_KEY        = <provided by Qore>
 ```
 PROGNOSIS_USERNAME           = <Leadway API user>
 PROGNOSIS_PASSWORD           = <Leadway API password>
+PROGNOSIS_API_KEY            = <static key Leadway provisioned for this API user>
+PROGNOSIS_API_KEY_HEADER     = <only if Leadway uses a header name other than X-API-Key>
 ```
 
-For API users (confirmed 17 Apr 2026), the "API key" for writes IS the
-dynamic bearer token issued by `/ApiUsers/Login` (6-hour lifetime,
-rotates). The app forwards that token on both `Authorization: Bearer …`
-AND `X-API-Key: …` headers for write calls. No static key to manage.
+Auth model (confirmed by live probing, 17 Apr 2026):
 
-Optional overrides — only set these if Leadway ever changes the scheme:
-```
-PROGNOSIS_API_KEY            = <static key, overrides the dynamic forward>
-PROGNOSIS_API_KEY_HEADER     = <header name, default "X-API-Key">
-```
+- **Reads** (`GetEnrolleeBioDataByEnrolleeID`,
+  `GetEnrolleeDependantsByEnrolleeID`) are authorised by the bearer
+  token issued by `POST /ApiUsers/Login` — the app handles this
+  automatically (6-hour token lifetime, cached for 5 h, refreshed on
+  demand).
+- **Writes** (`UpdateMemberData`) sit behind an **additional
+  API-gateway check** that expects a **separate static key** on the
+  `X-API-Key` header. The bearer token does NOT satisfy this check
+  (we confirmed: sending the bearer as `X-API-Key` produces
+  `401 "Invalid API Key"`).
+
+Without `PROGNOSIS_API_KEY` set, every write will 401 and you'll see
+`prognosis.update.unauthorized` in the logs.
+
+If you don't have the key yet, ask Leadway:
+> *"For /EnrolleeProfile/UpdateMemberData we get `401 "API Key is
+> missing"` until we send an `X-API-Key` header. Please provision the
+> API key value for our API user `<username>` and confirm the exact
+> header name."*
 
 ### Admin bootstrap
 ```
