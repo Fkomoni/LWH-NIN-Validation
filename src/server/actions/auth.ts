@@ -13,6 +13,7 @@ import { rateLimit } from "@/server/rateLimit";
 import { isLocked, recordFail, clearFailures } from "@/server/lockout";
 import { notifyLockout } from "@/server/notify";
 import { enqueuePrognosis } from "@/server/outbox";
+import { notifyNinValidated } from "@/server/notify";
 import { appConfig } from "@/config/app";
 
 export type AuthStartState =
@@ -249,6 +250,12 @@ export async function authByPrincipalNin(
           traceId: tid,
           payload: { txnRef: payload.txnRef },
         });
+        if (write.ok) {
+          await notifyNinValidated({
+            principalEnrolleeId: parsed.data.enrolleeId,
+            beneficiaryName: verify.verifiedFullName ?? principal.fullName,
+          }).catch(() => undefined);
+        }
       } catch {
         /* outbox drain will retry */
       }

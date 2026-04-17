@@ -35,9 +35,24 @@ function renderLockoutEmail(vars: Vars): { subject: string; body: string } {
 }
 
 function renderValidatedEmail(vars: Vars): { subject: string; body: string } {
+  const principal = vars.principalName ?? vars.fullName ?? "there";
+  const beneficiary = vars.beneficiaryName ?? vars.fullName ?? "this member";
   return {
-    subject: `Leadway Health — NIN successfully linked`,
-    body: `Hi ${vars.fullName},\n\nWe've linked your NIN to your Leadway Health plan as part of the NHIA requirement. No action needed. If this wasn't you, please contact support.\n\nLeadway Health`,
+    subject: `NIN update successful for ${beneficiary} — Leadway Health`,
+    body: [
+      `Hi ${principal},`,
+      ``,
+      `Thank you for taking the time to complete the NIN update exercise.`,
+      ``,
+      `We're writing to confirm that the National Identity Number (NIN) for ${beneficiary} has been successfully verified and updated on your Leadway Health plan.`,
+      ``,
+      `No further action is needed. If you did not request this update, please contact our support team immediately.`,
+      ``,
+      `Email: ${appConfig.contact.supportEmail}`,
+      `Call Centre: ${appConfig.contact.supportPhone}`,
+      ``,
+      `The Leadway Health Team`,
+    ].join("\n"),
   };
 }
 

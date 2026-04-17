@@ -1,5 +1,6 @@
 import "server-only";
 import { getServices } from "@/services";
+import { getEnrolleeBioData } from "@/services/http/PrognosisMemberClient";
 import { appConfig } from "@/config/app";
 import { log } from "@/lib/logger";
 
@@ -44,22 +45,47 @@ export async function notifyLockout(args: {
 }
 
 /**
- * Fire-and-forget receipt email on successful NIN validation. No email
- * on file ⇒ silent no-op (Phase 1). Phase 2 pulls email from the
- * Prognosis bio record.
+ * Confirmation email after a successful NIN validation + Prognosis
+ * write. Always addressed to the **principal** (authenticated user),
+ * with the body naming the exact beneficiary whose NIN was updated.
+ *
+ * Principal email + name are fetched from Prognosis so the caller
+ * doesn't need to propagate those through the service layer.
  */
 export async function notifyNinValidated(args: {
-  fullName: string;
-  email?: string;
+  principalEnrolleeId: string;
+  beneficiaryName: string;
 }): Promise<void> {
-  if (!args.email) return;
+  if (!appConfig.sendReceiptEmail) return;
+
   try {
-    await getServices().notification.send({
+    const principalBio = await getEnrolleeBioData(args.principalEnrolleeId);
+    if (!principalBio?.email) {
+      log.info(
+        { enrolleeId: args.principalEnrolleeId },
+        "notify.nin-validated.no-email-on-file",
+      );
+      return;
+    }
+
+    const res = await getServices().notification.send({
       kind: "nin.validated.email",
-      to: { email: args.email },
-      vars: { fullName: args.fullName },
+      to: { email: principalBio.email },
+      vars: {
+        principalName: principalBio.fullName,
+        beneficiaryName: args.beneficiaryName,
+      },
     });
+    if (!res.ok) {
+      log.error(
+        { reason: res.reason, enrolleeId: args.principalEnrolleeId },
+        "notify.nin-validated.fail",
+      );
+    }
   } catch (err) {
-    log.error({ err: String(err) }, "nin.receipt.failed");
+    log.error(
+      { err: String(err), enrolleeId: args.principalEnrolleeId },
+      "notify.nin-validated.exception",
+    );
   }
 }

@@ -12,7 +12,6 @@ import { maskNin } from "@/lib/mask";
 import { rateLimit } from "@/server/rateLimit";
 import { enqueuePrognosis } from "@/server/outbox";
 import { notifyNinValidated } from "@/server/notify";
-import { appConfig } from "@/config/app";
 import { log } from "@/lib/logger";
 import type { NinValidationResult } from "@/types/domain";
 
@@ -105,8 +104,14 @@ export async function submitBeneficiaryNin(input: unknown): Promise<NinSubmitRes
           traceId: tid,
           payload: { txnRef: ref },
         });
-        if (appConfig.sendReceiptEmail && result.verifiedFullName) {
-          await notifyNinValidated({ fullName: result.verifiedFullName }).catch(() => undefined);
+        // Fire the receipt email ONLY after a successful write. The
+        // email goes to the principal (the authenticated user) and
+        // names the specific beneficiary whose NIN was updated.
+        if (write.ok && result.verifiedFullName) {
+          await notifyNinValidated({
+            principalEnrolleeId: session.enrolleeId,
+            beneficiaryName: result.verifiedFullName,
+          }).catch(() => undefined);
         }
       } catch (err) {
         log.error({ err: String(err), txnRef: ref }, "after.prognosis.write.fail");

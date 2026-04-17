@@ -27,6 +27,7 @@ export interface PrognosisMember {
   dob?: string;
   phone?: string;
   gender?: string;
+  email?: string;
   relationship?: string;
   /** Raw NIN if Prognosis already has one on file. */
   existingNin?: string;
@@ -116,6 +117,13 @@ function mapMember(b: Body, fallbackId: string): PrognosisMember | null {
       "mobileNumber",
     ]),
     gender: str(b, ["Member_Gender", "Gender", "gender", "Sex", "sex"]),
+    email: str(b, [
+      "Member_EmailAddress_One",
+      "Member_EmailAddress_Two",
+      "EmailAddress",
+      "email",
+      "Email",
+    ]),
     relationship: str(b, [
       "Member_RelationshipToPrincipal",
       "RelationshipToPrincipal",

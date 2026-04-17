@@ -72,10 +72,9 @@ export const appConfig = {
    * Security-ops email confirmed by client (17 Apr 2026): f-komoni-mbaekwe@leadway.com
    */
   contact: {
-    // TODO(client): confirm support phone + hours — awaited.
-    supportPhone: "+234-000-000-0000",
-    supportEmail: "support@leadway.com",
-    supportHours: "Mon–Fri, 8am–6pm WAT",
+    // Confirmed by client 17 Apr 2026.
+    supportPhone: "07080627051 / 02012801051",
+    supportEmail: "healthcare@leadway.com",
     securityOpsEmail: "f-komoni-mbaekwe@leadway.com",
   },
 
