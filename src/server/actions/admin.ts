@@ -3,7 +3,10 @@
 import { redirect } from "next/navigation";
 import { clearAdminSession, findDevAdmin, setAdminSession } from "@/server/admin/session";
 import { resolveReview } from "@/server/admin/reviews";
-import { adminUnlock } from "@/server/lockout";
+import { adminResetMember, adminUnlock } from "@/server/lockout";
+import { getAdminSession } from "@/server/admin/session";
+import { revalidatePath } from "next/cache";
+import { enrolleeIdSchema } from "@/schemas/auth";
 import { drainPrognosisOutbox } from "@/server/outbox";
 import { audit } from "@/server/audit";
 import { traceId } from "@/lib/ids";
@@ -66,4 +69,30 @@ export async function unlockEnrolleeAction(formData: FormData): Promise<void> {
 
 export async function drainOutboxAction(): Promise<{ processed: number; remaining: number }> {
   return drainPrognosisOutbox();
+}
+
+export type ResetMemberState =
+  | { status: "idle" }
+  | { status: "ok"; enrolleeId: string }
+  | { status: "error"; message: string };
+
+/**
+ * Clear lockout, rate limits, and OTP state for a single enrolleeId.
+ * Used to unblock a tester (or a real customer after an outage) without
+ * waiting for the sliding windows to expire.
+ */
+export async function resetMemberAction(
+  _prev: ResetMemberState,
+  formData: FormData,
+): Promise<ResetMemberState> {
+  const admin = await getAdminSession();
+  if (!admin) return { status: "error", message: "Not signed in." };
+
+  const parsed = enrolleeIdSchema.safeParse(formData.get("enrolleeId"));
+  if (!parsed.success) {
+    return { status: "error", message: parsed.error.issues[0]?.message ?? "Invalid ID." };
+  }
+  await adminResetMember(parsed.data, admin.id);
+  revalidatePath("/admin/unlock");
+  return { status: "ok", enrolleeId: parsed.data };
 }

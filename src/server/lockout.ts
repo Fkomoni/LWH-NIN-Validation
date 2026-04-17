@@ -91,3 +91,30 @@ export async function adminUnlock(enrolleeId: string, adminId: string): Promise<
     payload: { enrolleeId },
   });
 }
+
+/**
+ * Full per-enrollee state reset. Used by the Ops console to let a
+ * tester retry without waiting for an hour / 48 h. Clears:
+ *   - hard lock + failure counter (same as adminUnlock)
+ *   - NIN-validate rate-limit counter
+ *   - OTP code, cooldown, resend counter
+ *
+ * Does NOT clear the Prognosis outbox (that is keyed by txnRef) nor the
+ * idempotency cache (each submit generates a fresh UUID anyway).
+ */
+export async function adminResetMember(enrolleeId: string, adminId: string): Promise<void> {
+  const kv = getKv();
+  await kv.del(hardKey(enrolleeId));
+  await kv.del(failKey(enrolleeId));
+  await kv.del(`rl:nin:enr:${enrolleeId}`);
+  await kv.del(`otp:code:${enrolleeId}`);
+  await kv.del(`otp:cooldown:${enrolleeId}`);
+  await kv.del(`otp:resends:${enrolleeId}`);
+  await audit({
+    action: "admin.reset-member",
+    actorType: "admin",
+    actorId: adminId,
+    traceId: traceId(),
+    payload: { enrolleeId },
+  });
+}

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { PageShell } from "@/components/layout/PageShell";
 import { Button } from "@/components/ui/button";
@@ -26,9 +27,14 @@ export default async function ReviewsPage() {
               Signed in as <span className="font-mono">{admin.email}</span> ({admin.role}).
             </p>
           </div>
-          <form action={adminLogout}>
-            <Button type="submit" variant="outline">Sign out</Button>
-          </form>
+          <div className="flex items-center gap-2">
+            <Button asChild variant="outline">
+              <Link href="/admin/unlock">Reset member</Link>
+            </Button>
+            <form action={adminLogout}>
+              <Button type="submit" variant="outline">Sign out</Button>
+            </form>
+          </div>
         </div>
 
         <section>
