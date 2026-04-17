@@ -55,13 +55,8 @@ export function runStartupCheck(): void {
     );
   }
 
-  // The write endpoint needs an API key in addition to the bearer token;
-  // without it Prognosis responds with 401 "API Key is missing" and we
-  // non-retryably fail the write. Warn loudly at boot.
-  if (!process.env.PROGNOSIS_API_KEY) {
-    log.warn(
-      {},
-      "startup.missing-prognosis-api-key: set PROGNOSIS_API_KEY (and PROGNOSIS_API_KEY_HEADER if the header isn't X-API-Key) to enable /EnrolleeProfile/UpdateMemberData; reads will still work but writes will 401.",
-    );
-  }
+  // PROGNOSIS_API_KEY + PROGNOSIS_API_KEY_HEADER are both optional.
+  // When absent we forward the dynamically-issued bearer token as the
+  // X-API-Key value, matching the client's confirmed auth model (the
+  // "key" is the login-issued token that rotates every 6 hours).
 }

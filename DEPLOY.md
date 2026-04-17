@@ -49,14 +49,18 @@ QORE_SECRET_KEY        = <provided by Qore>
 ```
 PROGNOSIS_USERNAME           = <Leadway API user>
 PROGNOSIS_PASSWORD           = <Leadway API password>
-PROGNOSIS_API_KEY            = <required for write endpoints>
-PROGNOSIS_API_KEY_HEADER     = <only if not "X-API-Key">
 ```
 
-The bearer token from `/ApiUsers/Login` is enough for the READ endpoints
-(`GetEnrolleeBioDataByEnrolleeID`, `GetEnrolleeDependantsByEnrolleeID`).
-The WRITE endpoint (`UpdateMemberData`) additionally requires an API key
-header. Without it Prognosis responds `401 "API Key is missing"`.
+For API users (confirmed 17 Apr 2026), the "API key" for writes IS the
+dynamic bearer token issued by `/ApiUsers/Login` (6-hour lifetime,
+rotates). The app forwards that token on both `Authorization: Bearer …`
+AND `X-API-Key: …` headers for write calls. No static key to manage.
+
+Optional overrides — only set these if Leadway ever changes the scheme:
+```
+PROGNOSIS_API_KEY            = <static key, overrides the dynamic forward>
+PROGNOSIS_API_KEY_HEADER     = <header name, default "X-API-Key">
+```
 
 ### Admin bootstrap
 ```
