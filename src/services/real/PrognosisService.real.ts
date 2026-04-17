@@ -1,27 +1,39 @@
 import "server-only";
 import type { PrognosisService, PrognosisUpsertResult } from "../types";
 import { getPrognosisToken } from "../http/PrognosisAuth";
+import { getEnrolleeBioData } from "../http/PrognosisMemberClient";
 import { log } from "@/lib/logger";
 
 /**
  * PrognosisService — write path.
  *
- * ⚠️ GAP (tracked in docs/architecture/open-questions.md §A2):
- * Leadway has confirmed the Prognosis **read** endpoints
- * (GetEnrolleeBioDataByEnrolleeID, GetEnrolleeDependantsByEnrolleeID)
- * and the Login endpoint, but we have NOT yet been given the
- * **update** endpoint for writing a verified NIN onto an enrollee
- * record. Until the client confirms it, this file posts to the path
- * configured by `PROGNOSIS_NIN_UPDATE_PATH` (defaulting to a plausible
- * "/EnrolleeProfile/UpdateEnrolleeNIN") and treats any 4xx as a
- * configuration error rather than a data error — the outbox will park
- * the write safely without double-calling NIMC.
+ * Confirmed endpoint (17 Apr 2026):
+ *   POST {BASE}/EnrolleeProfile/UpdateMemberData
  *
- * When the real endpoint + body shape land, only this file needs to
- * change; the `PrognosisUpdatePayload` at the call site is stable.
+ * Confirmed body shape (note the exact casing — it is provider-defined):
+ *   {
+ *     "Gender":       "Male",
+ *     "NIN":          "12345678901",
+ *     "PHoneNumber":  "08012345678",
+ *     "Enrolleeid":   "EN-00123",
+ *     "DOB":          19900115.0     // ISO date → number YYYYMMDD
+ *   }
+ *
+ * The orchestrator gives us memberId (= enrolleeId), NIN, verified name,
+ * and the NIN-sourced DOB. Gender + raw phone live on the enrollee bio
+ * record, so we re-read the bio here before the write. This is a small
+ * extra round-trip but keeps the write idempotent and self-contained,
+ * and avoids leaking raw phone numbers through the UI boundary.
  */
 
-const DEFAULT_PATH = "/EnrolleeProfile/UpdateEnrolleeNIN";
+const DEFAULT_PATH = "/EnrolleeProfile/UpdateMemberData";
+
+/** "1990-01-15" → 19900115 (a JSON number Prognosis deserialises as double). */
+function dobToNumber(iso: string): number | null {
+  if (!/^\d{4}-\d{2}-\d{2}/.test(iso)) return null;
+  const n = Number(iso.slice(0, 10).replace(/-/g, ""));
+  return Number.isFinite(n) ? n : null;
+}
 
 export const realPrognosisService: PrognosisService = {
   async upsertMemberNin(payload): Promise<PrognosisUpsertResult> {
@@ -33,6 +45,29 @@ export const realPrognosisService: PrognosisService = {
     }
 
     try {
+      const bio = await getEnrolleeBioData(payload.memberId);
+      if (!bio) {
+        log.error({ memberId: payload.memberId }, "prognosis.update.member-not-found");
+        return { ok: false, reason: "PROVIDER_ERROR", retryable: false };
+      }
+
+      const dobNum = dobToNumber(payload.dobFromNin);
+      if (dobNum === null) {
+        log.error(
+          { memberId: payload.memberId, dob: payload.dobFromNin },
+          "prognosis.update.invalid-dob",
+        );
+        return { ok: false, reason: "PROVIDER_ERROR", retryable: false };
+      }
+
+      const body = {
+        Gender: bio.gender ?? "",
+        NIN: payload.nin,
+        PHoneNumber: bio.phone ?? "",
+        Enrolleeid: payload.memberId,
+        DOB: dobNum,
+      };
+
       const token = await getPrognosisToken();
       const res = await fetch(`${base}${path}`, {
         method: "POST",
@@ -42,16 +77,7 @@ export const realPrognosisService: PrognosisService = {
           authorization: `Bearer ${token}`,
           "Idempotency-Key": payload.txnRef,
         },
-        body: JSON.stringify({
-          EnrolleeID: payload.memberId,
-          NIN: payload.nin,
-          VerifiedFullName: payload.verifiedFullName,
-          DateOfBirth: payload.dobFromNin,
-          ValidationStatus: payload.validationStatus,
-          ValidatedAt: payload.validatedAt,
-          Source: payload.source,
-          TxnRef: payload.txnRef,
-        }),
+        body: JSON.stringify(body),
       });
       if (res.status === 409) {
         return { ok: false, reason: "DUPLICATE", retryable: false };
@@ -60,9 +86,8 @@ export const realPrognosisService: PrognosisService = {
         return { ok: false, reason: "PROVIDER_ERROR", retryable: true };
       }
       if (!res.ok) {
-        // 4xx (not duplicate) — likely our payload doesn't match the
-        // real endpoint contract. The outbox will hold it until the
-        // endpoint is confirmed and redeployed.
+        // 4xx (not duplicate) — payload rejected. Outbox will hold it
+        // until we correct whatever mismatched.
         log.error({ status: res.status, path }, "prognosis.update.4xx");
         return { ok: false, reason: "PROVIDER_ERROR", retryable: true };
       }

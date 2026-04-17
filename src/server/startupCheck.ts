@@ -55,10 +55,7 @@ export function runStartupCheck(): void {
     );
   }
 
-  if (!process.env.PROGNOSIS_NIN_UPDATE_PATH) {
-    log.warn(
-      {},
-      "startup.nin-update-endpoint-not-confirmed: falling back to /EnrolleeProfile/UpdateEnrolleeNIN; writes will be parked in the outbox if that is wrong (awaiting client confirmation)",
-    );
-  }
+  // PROGNOSIS_NIN_UPDATE_PATH is optional — default is the confirmed
+  // /EnrolleeProfile/UpdateMemberData path. Only warn if the operator
+  // overrode it to an obviously wrong value.
 }

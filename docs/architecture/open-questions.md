@@ -12,16 +12,15 @@ Resolved items are struck through with a ✅; outstanding items carry ⚠️.
 - Verify endpoint: `${QORE_NIN_VERIFY_URL}${nin}` (POST, Bearer token) — body `{firstname, lastname}`.
 - Implemented in `src/services/http/QoreIdClient.ts` with 50-min token cache, abort-based timeout, and resilient field extraction (accepts multiple casings for name/DOB).
 
-### A2. Prognosis (core policy system) — ⚠️ **partial**
+### A2. Prognosis (core policy system) — ✅ resolved
 - ✅ Login: `POST {base}/ApiUsers/Login`
 - ✅ Read: `/EnrolleeProfile/GetEnrolleeBioDataByEnrolleeID?enrolleeid=…`
 - ✅ Read: `/EnrolleeProfile/GetEnrolleeDependantsByEnrolleeID?enrolleeid=…`
-- ⚠️ **Write** — the Prognosis endpoint for updating a verified NIN on
-  an enrollee record has NOT been confirmed. `realPrognosisService`
-  currently posts to `PROGNOSIS_NIN_UPDATE_PATH` (default
-  `/EnrolleeProfile/UpdateEnrolleeNIN`) and treats 4xx as a config
-  error so the outbox parks the write safely. **Please send the real
-  endpoint URL + payload field names.**
+- ✅ Write: `POST {base}/EnrolleeProfile/UpdateMemberData` with body
+  `{ Gender, NIN, PHoneNumber, Enrolleeid, DOB (YYYYMMDD as number) }`.
+  Implemented in `src/services/real/PrognosisService.real.ts` — reads
+  Gender + raw phone from the bio endpoint, converts ISO DOB to the
+  numeric form, sends `Idempotency-Key = txnRef`.
 
 ### A3. Member lookup — ✅ resolved
 Using Prognosis read endpoints above. Enrollee ID format is `NNNNNNNN/N`
@@ -88,9 +87,8 @@ Using Prognosis read endpoints above. Enrollee ID format is `NNNNNNNN/N`
 
 ## Outstanding blockers
 
-1. Prognosis **NIN-update** endpoint + payload field names (A2).
-2. Exact support phone / email / hours for the always-visible
+1. Exact support phone / email / hours for the always-visible
    support-block component (C1) — **client will supply later**.
-3. Prognosis OTP SMS `TemplateId` confirmation (A4 minor).
-4. Decision on Upstash Redis vs. sticking with in-memory KV on Render
+2. Prognosis OTP SMS `TemplateId` confirmation (A4 minor).
+3. Decision on Upstash Redis vs. sticking with in-memory KV on Render
    single-instance (E3).

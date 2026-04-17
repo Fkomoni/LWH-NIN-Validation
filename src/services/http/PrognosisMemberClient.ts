@@ -21,6 +21,7 @@ export interface PrognosisMember {
   fullName: string;
   dob?: string;
   phone?: string;
+  gender?: string;
   relationship?: string;
   ninStatus?: string;
 }
@@ -60,10 +61,19 @@ function mapMember(b: Body, fallbackId: string): PrognosisMember | null {
   const fullName = fullNameFromBody(b);
   if (!fullName) return null;
   return {
-    enrolleeId: str(b, ["EnrolleeID", "enrolleeId", "EnrolleeId", "enrolleeid"]) ?? fallbackId,
+    enrolleeId: str(b, ["EnrolleeID", "enrolleeId", "EnrolleeId", "enrolleeid", "Enrolleeid"]) ?? fallbackId,
     fullName,
     dob: normaliseDob(str(b, ["DateOfBirth", "dateOfBirth", "DOB", "dob", "BirthDate"])),
-    phone: str(b, ["Phone", "phone", "PhoneNumber", "phoneNumber", "MobileNumber", "mobileNumber"]),
+    phone: str(b, [
+      "Phone",
+      "phone",
+      "PhoneNumber",
+      "PHoneNumber", // Prognosis ships this exact casing
+      "phoneNumber",
+      "MobileNumber",
+      "mobileNumber",
+    ]),
+    gender: str(b, ["Gender", "gender", "Sex", "sex"]),
     relationship: str(b, ["Relationship", "relationship"]),
     ninStatus: str(b, ["NinStatus", "ninStatus", "NINStatus"]),
   };
