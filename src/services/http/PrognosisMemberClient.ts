@@ -153,10 +153,10 @@ function bodyKeys(body: unknown): string[] {
 
 async function authedGet(url: string): Promise<{ status: number; body: unknown }> {
   const token = await getPrognosisToken();
-  const res = await fetch(url, {
-    method: "GET",
-    headers: { accept: "application/json", authorization: `Bearer ${token}` },
-  });
+  const headers = new Headers();
+  headers.set("accept", "application/json");
+  headers.set("Authorization", `Bearer ${token}`);
+  const res = await fetch(url, { method: "GET", headers });
   const body = await res.json().catch(() => null);
   return { status: res.status, body };
 }

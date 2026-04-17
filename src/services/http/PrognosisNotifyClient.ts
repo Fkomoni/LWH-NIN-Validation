@@ -21,13 +21,13 @@ async function authedPost<T = unknown>(path: string, body: unknown): Promise<T |
   const base = process.env.PROGNOSIS_BASE_URL;
   if (!base) throw new Error("prognosis.missing-base-url");
   const token = await getPrognosisToken();
+  const headers = new Headers();
+  headers.set("accept", "application/json");
+  headers.set("content-type", "application/json");
+  headers.set("Authorization", `Bearer ${token}`);
   const res = await fetch(`${base}${path}`, {
     method: "POST",
-    headers: {
-      accept: "application/json",
-      "content-type": "application/json",
-      authorization: `Bearer ${token}`,
-    },
+    headers,
     body: JSON.stringify(body),
   });
   if (!res.ok) {

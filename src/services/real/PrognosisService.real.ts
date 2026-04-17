@@ -137,32 +137,44 @@ export const realPrognosisService: PrognosisService = {
 
       const token = await getPrognosisToken();
 
-      // Write endpoints sit behind an API-gateway check that is
-      // separate from the /ApiUsers/Login bearer token.
-      //
-      // Live evidence (17 Apr 2026):
-      //   no X-API-Key header        → "API Key is missing"
-      //   X-API-Key = bearer token   → "Invalid API Key"
-      //
-      // So the gateway really wants a distinct static key (or a
-      // separately-scoped token). Leadway must provision it for this
-      // API user. Set the value via PROGNOSIS_API_KEY; override the
-      // header name via PROGNOSIS_API_KEY_HEADER if Leadway uses a
-      // different casing. Without the key set, the write will 401.
-      const apiKeyValue = process.env.PROGNOSIS_API_KEY;
-      const apiKeyHeaderName = process.env.PROGNOSIS_API_KEY_HEADER ?? "X-API-Key";
+      // Headers class guarantees case-insensitive dedupe — plain objects
+      // let `authorization` and `Authorization` coexist as two distinct
+      // keys and fetch() then picks one at random, which is exactly the
+      // class of bug that made the previous attempts flaky.
+      const headers = new Headers();
+      headers.set("accept", "application/json");
+      headers.set("content-type", "application/json");
+      headers.set("Authorization", `Bearer ${token}`);
+      headers.set("Idempotency-Key", payload.txnRef);
 
-      const reqHeaders: Record<string, string> = {
-        accept: "application/json",
-        "content-type": "application/json",
-        authorization: `Bearer ${token}`,
-        "Idempotency-Key": payload.txnRef,
-      };
-      if (apiKeyValue) reqHeaders[apiKeyHeaderName] = apiKeyValue;
+      // Optional additional API-key header (e.g. a gateway that wants
+      // `X-API-Key`). We intentionally skip this if an operator tries
+      // to override the `Authorization` header — that slot already
+      // carries the dynamic bearer, and duplicating it clobbers itself.
+      const apiKeyValue = process.env.PROGNOSIS_API_KEY;
+      const apiKeyHeaderName = process.env.PROGNOSIS_API_KEY_HEADER;
+      if (
+        apiKeyValue &&
+        apiKeyHeaderName &&
+        apiKeyHeaderName.toLowerCase() !== "authorization"
+      ) {
+        headers.set(apiKeyHeaderName, apiKeyValue);
+      }
+
+      log.info(
+        {
+          path: PATH,
+          txnRef: payload.txnRef,
+          headers: [...headers.keys()],
+          authorizationLen: headers.get("Authorization")?.length ?? 0,
+          authorizationPrefix: headers.get("Authorization")?.slice(0, 12) ?? null,
+        },
+        "prognosis.update.headers",
+      );
 
       const res = await fetch(`${base}${PATH}`, {
         method: "POST",
-        headers: reqHeaders,
+        headers,
         body: JSON.stringify(body),
       });
       const parsed = (await res.json().catch(() => null)) as UpdateMemberDataResponse | null;

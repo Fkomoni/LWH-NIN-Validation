@@ -45,11 +45,10 @@ services:
         sync: false
       - key: PROGNOSIS_PASSWORD
         sync: false
-      # Required for /EnrolleeProfile/UpdateMemberData (writes).
-      # Leadway provisions this separately from username/password.
+      # Optional — only if Leadway provisions a SEPARATE static key
+      # on a header distinct from Authorization.
       - key: PROGNOSIS_API_KEY
         sync: false
-      # Only set if Leadway uses a header name other than X-API-Key.
       - key: PROGNOSIS_API_KEY_HEADER
         sync: false
       # Optional Phase-2 extras
