@@ -73,6 +73,12 @@ export async function drainPrognosisOutbox(): Promise<{ processed: number; remai
       processed++;
       continue;
     }
+    if (!res.retryable) {
+      // Deterministic rejection (e.g. Success:false with a permanent
+      // reason). Drop to dead letter; ops can requeue after fixing.
+      log.error({ txnRef: it.id, reason: res.reason }, "outbox.prognosis.non-retryable");
+      continue;
+    }
     const attempts = it.attempts + 1;
     if (attempts >= MAX_ATTEMPTS) {
       log.error({ txnRef: it.id, attempts }, "outbox.prognosis.exhausted");

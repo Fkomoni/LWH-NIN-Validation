@@ -7,26 +7,37 @@ import { log } from "@/lib/logger";
 /**
  * PrognosisService — write path.
  *
- * Confirmed endpoint (17 Apr 2026):
- *   POST {BASE}/EnrolleeProfile/UpdateMemberData
+ * Confirmed endpoint + shapes (17 Apr 2026):
  *
- * Confirmed body shape (note the exact casing — it is provider-defined):
+ *   POST {BASE}/EnrolleeProfile/UpdateMemberData
  *   {
- *     "Gender":       "Male",
- *     "NIN":          "12345678901",
- *     "PHoneNumber":  "08012345678",
- *     "Enrolleeid":   "EN-00123",
- *     "DOB":          19900115.0     // ISO date → number YYYYMMDD
+ *     "Gender":      "Male",
+ *     "NIN":         "12345678901",
+ *     "PHoneNumber": "08012345678",    // note the exact casing
+ *     "Enrolleeid":  "EN-00123",
+ *     "DOB":         19900115.0         // ISO date → YYYYMMDD number
  *   }
  *
- * The orchestrator gives us memberId (= enrolleeId), NIN, verified name,
- * and the NIN-sourced DOB. Gender + raw phone live on the enrollee bio
- * record, so we re-read the bio here before the write. This is a small
- * extra round-trip but keeps the write idempotent and self-contained,
- * and avoids leaking raw phone numbers through the UI boundary.
+ *   200 OK
+ *   {
+ *     "status": 200,
+ *     "result": {
+ *       "Success": true,
+ *       "Message": "Member updated successfully.",
+ *       "NewId":   "EN-00123-A",
+ *       "Data":    [ { … } ]
+ *     }
+ *   }
+ *
+ *   On a **logical** failure the endpoint may still return HTTP 200
+ *   with `result.Success === false` and a `Message` explaining the
+ *   rejection (duplicate NIN, invalid DOB, missing field, etc.). We
+ *   treat that as non-retryable so the outbox doesn't retry forever
+ *   on a deterministic rejection — ops can inspect the log and requeue
+ *   by hand if needed.
  */
 
-const DEFAULT_PATH = "/EnrolleeProfile/UpdateMemberData";
+const PATH = "/EnrolleeProfile/UpdateMemberData";
 
 /** "1990-01-15" → 19900115 (a JSON number Prognosis deserialises as double). */
 function dobToNumber(iso: string): number | null {
@@ -35,10 +46,27 @@ function dobToNumber(iso: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+interface UpdateMemberDataResult {
+  Success?: boolean;
+  Message?: string;
+  NewId?: string | number;
+  Data?: unknown[];
+}
+
+interface UpdateMemberDataResponse {
+  status?: number;
+  result?: UpdateMemberDataResult;
+}
+
+function messageSuggestsDuplicate(msg?: string): boolean {
+  if (!msg) return false;
+  const m = msg.toLowerCase();
+  return m.includes("duplicate") || m.includes("already") || m.includes("exist");
+}
+
 export const realPrognosisService: PrognosisService = {
   async upsertMemberNin(payload): Promise<PrognosisUpsertResult> {
     const base = process.env.PROGNOSIS_BASE_URL;
-    const path = process.env.PROGNOSIS_NIN_UPDATE_PATH ?? DEFAULT_PATH;
     if (!base) {
       log.error({}, "prognosis.update.missing-base-url");
       return { ok: false, reason: "PROVIDER_ERROR", retryable: true };
@@ -69,7 +97,7 @@ export const realPrognosisService: PrognosisService = {
       };
 
       const token = await getPrognosisToken();
-      const res = await fetch(`${base}${path}`, {
+      const res = await fetch(`${base}${PATH}`, {
         method: "POST",
         headers: {
           accept: "application/json",
@@ -79,19 +107,41 @@ export const realPrognosisService: PrognosisService = {
         },
         body: JSON.stringify(body),
       });
-      if (res.status === 409) {
-        return { ok: false, reason: "DUPLICATE", retryable: false };
-      }
+
       if (res.status >= 500) {
         return { ok: false, reason: "PROVIDER_ERROR", retryable: true };
       }
       if (!res.ok) {
-        // 4xx (not duplicate) — payload rejected. Outbox will hold it
-        // until we correct whatever mismatched.
-        log.error({ status: res.status, path }, "prognosis.update.4xx");
+        // 4xx — auth / payload shape issue. Retryable in case of
+        // transient provider flakiness; outbox caps attempts at 6.
+        log.error({ status: res.status }, "prognosis.update.4xx");
         return { ok: false, reason: "PROVIDER_ERROR", retryable: true };
       }
-      return { ok: true, txnRef: payload.txnRef };
+
+      const parsed = (await res.json().catch(() => null)) as UpdateMemberDataResponse | null;
+      const result = parsed?.result;
+      if (!result) {
+        log.error({ status: res.status }, "prognosis.update.bad-body");
+        return { ok: false, reason: "PROVIDER_ERROR", retryable: true };
+      }
+
+      if (result.Success === true) {
+        log.info(
+          { memberId: payload.memberId, newId: result.NewId, txnRef: payload.txnRef },
+          "prognosis.update.ok",
+        );
+        return { ok: true, txnRef: payload.txnRef };
+      }
+
+      // Logical failure — log the Message and do NOT retry by default.
+      log.warn(
+        { memberId: payload.memberId, message: result.Message, txnRef: payload.txnRef },
+        "prognosis.update.rejected",
+      );
+      if (messageSuggestsDuplicate(result.Message)) {
+        return { ok: false, reason: "DUPLICATE", retryable: false };
+      }
+      return { ok: false, reason: "PROVIDER_ERROR", retryable: false };
     } catch (err) {
       log.error({ err: String(err) }, "prognosis.update.fail");
       return { ok: false, reason: "PROVIDER_ERROR", retryable: true };

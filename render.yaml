@@ -45,8 +45,6 @@ services:
         sync: false
       - key: PROGNOSIS_PASSWORD
         sync: false
-      - key: PROGNOSIS_NIN_UPDATE_PATH
-        sync: false
       # Optional Phase-2 extras
       - key: TURNSTILE_SITE_KEY
         sync: false

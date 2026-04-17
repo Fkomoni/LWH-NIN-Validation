@@ -61,4 +61,26 @@ describe("outbox", () => {
     expect(r.processed).toBe(1);
     expect(r.remaining).toBe(0);
   });
+
+  it("drops non-retryable failures to dead letter without further retries", async () => {
+    upsertMock.mockReset();
+    upsertMock.mockResolvedValue({ ok: false, reason: "DUPLICATE", retryable: false });
+
+    await enqueuePrognosis({
+      memberId: "m-2",
+      nin: "12345678902",
+      verifiedFullName: "X",
+      dobFromNin: "1985-06-15",
+      validationStatus: "VALIDATED",
+      validatedAt: "2026-01-01T00:00:00Z",
+      source: "self-service-portal",
+      txnRef: "t2",
+    });
+
+    vi.setSystemTime(new Date("2026-01-01T00:00:02Z"));
+    const r = await drainPrognosisOutbox();
+    expect(r.processed).toBe(0);
+    expect(r.remaining).toBe(0); // dropped, not rescheduled
+    expect(upsertMock).toHaveBeenCalledTimes(1);
+  });
 });
