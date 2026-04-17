@@ -10,8 +10,10 @@ import { maskNin } from "@/lib/mask";
  *   2. POST {QORE_NIN_VERIFY_URL}{nin} with Bearer token and
  *      { firstname, lastname } → verification response
  *
- * Access tokens are cached in-process for 50 minutes (Qore's quoted TTL
- * is ~1 h; we refresh early to avoid races on long-running requests).
+ * Access tokens are cached in-process for 50 minutes.
+ *
+ * Every call logs HTTP status + body-key list (never values) so an
+ * unexpected Qore shape is immediately visible in Render logs.
  */
 
 export interface QoreToken {
@@ -21,6 +23,23 @@ export interface QoreToken {
 
 let cachedToken: QoreToken | null = null;
 const TOKEN_TTL_MS = 50 * 60 * 1000;
+
+function bodyKeys(body: unknown): string[] {
+  if (body && typeof body === "object") return Object.keys(body as Record<string, unknown>);
+  return [];
+}
+
+function readAccessToken(body: unknown): string | undefined {
+  if (!body || typeof body !== "object") return undefined;
+  const b = body as Record<string, unknown>;
+  for (const k of ["accessToken", "access_token", "AccessToken", "token", "Token"]) {
+    const v = b[k];
+    if (typeof v === "string" && v.length) return v;
+  }
+  if (b.data && typeof b.data === "object") return readAccessToken(b.data);
+  if (b.result && typeof b.result === "object") return readAccessToken(b.result);
+  return undefined;
+}
 
 async function getAccessToken(): Promise<string> {
   if (cachedToken && Date.now() - cachedToken.fetchedAt < TOKEN_TTL_MS) {
@@ -37,13 +56,19 @@ async function getAccessToken(): Promise<string> {
     headers: { accept: "text/plain", "content-type": "application/json" },
     body: JSON.stringify({ clientId, secret }),
   });
+  const body = await res.json().catch(() => null);
+  log.info({ status: res.status, keys: bodyKeys(body) }, "qore.token.response");
   if (!res.ok) {
+    log.error({ status: res.status }, "qore.token.http-fail");
     throw new Error(`qore.token.http-${res.status}`);
   }
-  const data = (await res.json()) as { accessToken?: string };
-  if (!data.accessToken) throw new Error("qore.token.no-accessToken");
-  cachedToken = { accessToken: data.accessToken, fetchedAt: Date.now() };
-  return data.accessToken;
+  const token = readAccessToken(body);
+  if (!token) {
+    log.error({ keys: bodyKeys(body) }, "qore.token.no-token-in-body");
+    throw new Error("qore.token.no-accessToken");
+  }
+  cachedToken = { accessToken: token, fetchedAt: Date.now() };
+  return token;
 }
 
 export interface QoreVerifyRequest {
@@ -53,14 +78,7 @@ export interface QoreVerifyRequest {
   traceId: string;
 }
 
-/**
- * The exact body shape Qore returns is provider-defined. We pull the
- * fields the orchestrator needs (name + DOB) and ignore the rest; any
- * structural surprise falls back to a provider error so the user sees
- * the support path, not a stack trace.
- */
 export interface QoreVerifyResponse {
-  /** Normalised to our internal vocabulary. */
   status: "VERIFIED" | "NOT_FOUND";
   fullName?: string;
   dob?: string;
@@ -77,22 +95,43 @@ function pick(obj: QoreBody, keys: string[]): string | undefined {
   return undefined;
 }
 
-function extractFullName(obj: QoreBody): string | undefined {
-  const direct = pick(obj, ["fullName", "fullname", "full_name"]);
+function unwrapQore(body: unknown): QoreBody {
+  // Qore tends to wrap payloads in either { data: {...} } or { nin: {...} }
+  // or return the raw object directly. We walk one level deep.
+  if (!body || typeof body !== "object") return {};
+  const b = body as QoreBody;
+  const wraps = ["data", "result", "nin", "payload", "response"];
+  for (const w of wraps) {
+    const v = b[w];
+    if (v && typeof v === "object" && !Array.isArray(v)) return v as QoreBody;
+  }
+  return b;
+}
+
+function extractFullName(raw: QoreBody): string | undefined {
+  const b = unwrapQore(raw);
+  const direct = pick(b, ["fullName", "fullname", "full_name", "FullName", "name"]);
   if (direct) return direct;
-  const first = pick(obj, ["firstName", "firstname", "first_name", "givenName", "givennames"]);
-  const middle = pick(obj, ["middleName", "middlename", "middle_name"]);
-  const last = pick(obj, ["lastName", "lastname", "last_name", "surname"]);
+  const first = pick(b, [
+    "firstName",
+    "firstname",
+    "first_name",
+    "givenName",
+    "givennames",
+    "FirstName",
+  ]);
+  const middle = pick(b, ["middleName", "middlename", "middle_name", "MiddleName"]);
+  const last = pick(b, ["lastName", "lastname", "last_name", "surname", "LastName", "Surname"]);
   const parts = [first, middle, last].filter(Boolean);
   return parts.length ? parts.join(" ") : undefined;
 }
 
-function extractDob(obj: QoreBody): string | undefined {
-  const raw = pick(obj, ["dateOfBirth", "dob", "birthDate"]);
-  if (!raw) return undefined;
-  // Accept "1985-06-15", "15/06/1985", "15-06-1985" → ISO
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
-  const m = raw.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+function extractDob(raw: QoreBody): string | undefined {
+  const b = unwrapQore(raw);
+  const val = pick(b, ["dateOfBirth", "dob", "DateOfBirth", "birthDate", "BirthDate"]);
+  if (!val) return undefined;
+  if (/^\d{4}-\d{2}-\d{2}/.test(val)) return val.slice(0, 10);
+  const m = val.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/);
   if (m) {
     const [, d, mo, y] = m;
     return `${y}-${mo?.padStart(2, "0")}-${d?.padStart(2, "0")}`;
@@ -111,7 +150,10 @@ export async function qoreVerifyNin(
   opts: { timeoutMs?: number } = {},
 ): Promise<QoreResult> {
   const base = process.env.QORE_NIN_VERIFY_URL;
-  if (!base) return { ok: false, error: { kind: "PROVIDER_ERROR" } };
+  if (!base) {
+    log.error({}, "qore.verify.missing-base-url");
+    return { ok: false, error: { kind: "PROVIDER_ERROR" } };
+  }
 
   let token: string;
   try {
@@ -124,7 +166,8 @@ export async function qoreVerifyNin(
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   try {
-    const res = await fetch(`${base}${encodeURIComponent(req.nin)}`, {
+    // The 11-digit NIN has no characters that need escaping; keep raw.
+    const res = await fetch(`${base}${req.nin}`, {
       method: "POST",
       headers: {
         accept: "application/json",
@@ -135,6 +178,17 @@ export async function qoreVerifyNin(
       body: JSON.stringify({ firstname: req.firstname, lastname: req.lastname }),
       signal: ctl.signal,
     });
+    const body = (await res.json().catch(() => null)) as QoreBody | null;
+    log.info(
+      {
+        status: res.status,
+        keys: bodyKeys(body),
+        inner: bodyKeys(unwrapQore(body ?? {})),
+        nin: maskNin(req.nin),
+      },
+      "qore.verify.response",
+    );
+
     if (res.status === 401 || res.status === 403) {
       cachedToken = null; // force refresh next call
       return { ok: false, error: { kind: "AUTH", status: res.status } };
@@ -145,17 +199,28 @@ export async function qoreVerifyNin(
     if (res.status >= 500) {
       return { ok: false, error: { kind: "PROVIDER_ERROR", status: res.status } };
     }
-    const body = (await res.json().catch(() => ({}))) as QoreBody;
-    const fullName = extractFullName(body);
-    const dob = extractDob(body);
+    if (res.status >= 400) {
+      return { ok: false, error: { kind: "PROVIDER_ERROR", status: res.status } };
+    }
+
+    const fullName = extractFullName(body ?? {});
+    const dob = extractDob(body ?? {});
     if (!fullName && !dob) {
-      // Provider responded OK but we couldn't find the fields we need.
+      log.warn(
+        {
+          nin: maskNin(req.nin),
+          keys: bodyKeys(body),
+          inner: bodyKeys(unwrapQore(body ?? {})),
+        },
+        "qore.verify.unrecognised-shape",
+      );
       return { ok: false, error: { kind: "PROVIDER_ERROR" } };
     }
     return { ok: true, data: { status: "VERIFIED", fullName, dob, raw: body } };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.includes("abort")) return { ok: false, error: { kind: "TIMEOUT" } };
+    log.error({ err: msg, nin: maskNin(req.nin) }, "qore.verify.fetch-throw");
     return { ok: false, error: { kind: "PROVIDER_ERROR" } };
   } finally {
     clearTimeout(timer);

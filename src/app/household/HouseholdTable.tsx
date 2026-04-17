@@ -82,9 +82,12 @@ export function HouseholdTable({ household }: { household: Household }) {
                 : result.outcome === "REVIEW_SOFT"
                   ? "MANUAL_REVIEW"
                   : result.outcome === "TIMEOUT" || result.outcome === "PROVIDER_ERROR"
-                    ? "SUBMITTED"
+                    ? "NOT_SUBMITTED" // transient — row stays editable for retry
                     : "FAILED",
-            message: result.message,
+            message:
+              result.outcome === "TIMEOUT" || result.outcome === "PROVIDER_ERROR"
+                ? "NIMC is temporarily unavailable. Please try again in a moment."
+                : result.message,
             supportRef: result.supportRef,
           },
         }));
