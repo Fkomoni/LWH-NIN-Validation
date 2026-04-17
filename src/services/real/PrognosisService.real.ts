@@ -137,37 +137,50 @@ export const realPrognosisService: PrognosisService = {
 
       const token = await getPrognosisToken();
 
-      // Headers class guarantees case-insensitive dedupe — plain objects
-      // let `authorization` and `Authorization` coexist as two distinct
-      // keys and fetch() then picks one at random, which is exactly the
-      // class of bug that made the previous attempts flaky.
+      // Prognosis write endpoints demand both:
+      //   1. Authorization: Bearer <token>   (identity — same as reads)
+      //   2. A SECONDARY header carrying the key (gateway-level check).
+      //
+      // Evidence from live probing:
+      //   no secondary header            → 401 "API Key is missing"
+      //   X-API-Key: <raw token>         → 401 "Invalid API Key"
+      //   X-API-Key: Bearer <token>      → (trying this now)
+      //
+      // Configure via env:
+      //   PROGNOSIS_API_KEY_HEADER       header name, default X-API-Key
+      //                                   (Authorization is ignored — that
+      //                                   slot already carries the bearer)
+      //   PROGNOSIS_API_KEY              static value override. When
+      //                                   unset, we forward the dynamic
+      //                                   token from /ApiUsers/Login.
+      //   PROGNOSIS_API_KEY_BEARER       "false" to send raw token;
+      //                                   default "true" prefixes Bearer.
+      const headerName = process.env.PROGNOSIS_API_KEY_HEADER ?? "X-API-Key";
+      const useBearer = (process.env.PROGNOSIS_API_KEY_BEARER ?? "true") !== "false";
+      const rawValue = process.env.PROGNOSIS_API_KEY ?? token;
+      const apiKeyValue = useBearer ? `Bearer ${rawValue}` : rawValue;
+
       const headers = new Headers();
       headers.set("accept", "application/json");
       headers.set("content-type", "application/json");
       headers.set("Authorization", `Bearer ${token}`);
       headers.set("Idempotency-Key", payload.txnRef);
-
-      // Optional additional API-key header (e.g. a gateway that wants
-      // `X-API-Key`). We intentionally skip this if an operator tries
-      // to override the `Authorization` header — that slot already
-      // carries the dynamic bearer, and duplicating it clobbers itself.
-      const apiKeyValue = process.env.PROGNOSIS_API_KEY;
-      const apiKeyHeaderName = process.env.PROGNOSIS_API_KEY_HEADER;
-      if (
-        apiKeyValue &&
-        apiKeyHeaderName &&
-        apiKeyHeaderName.toLowerCase() !== "authorization"
-      ) {
-        headers.set(apiKeyHeaderName, apiKeyValue);
+      if (headerName.toLowerCase() !== "authorization") {
+        headers.set(headerName, apiKeyValue);
       }
 
       log.info(
         {
           path: PATH,
           txnRef: payload.txnRef,
-          headers: [...headers.keys()],
+          headerNames: [...headers.keys()],
           authorizationLen: headers.get("Authorization")?.length ?? 0,
-          authorizationPrefix: headers.get("Authorization")?.slice(0, 12) ?? null,
+          authorizationHead: headers.get("Authorization")?.slice(0, 12) ?? null,
+          keyHeaderName: headerName,
+          keyHeaderLen: headers.get(headerName)?.length ?? 0,
+          keyHeaderHead: headers.get(headerName)?.slice(0, 12) ?? null,
+          keyUsesBearer: useBearer,
+          keyFromEnv: Boolean(process.env.PROGNOSIS_API_KEY),
         },
         "prognosis.update.headers",
       );

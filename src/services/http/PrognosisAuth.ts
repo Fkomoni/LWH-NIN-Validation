@@ -33,6 +33,19 @@ function readToken(body: unknown): string | undefined {
   return undefined;
 }
 
+/** Summarise a parsed JSON body for safe logging: key name, type, and
+ *  a short prefix of string values. No full token ever leaves the
+ *  process, but we get enough signal to spot a mislabelled field. */
+function bodyShape(body: unknown): Array<{ k: string; type: string; len?: number; head?: string }> {
+  if (!body || typeof body !== "object") return [];
+  return Object.entries(body as Record<string, unknown>).map(([k, v]) => {
+    if (typeof v === "string")
+      return { k, type: "string", len: v.length, head: v.slice(0, 12) };
+    if (v === null) return { k, type: "null" };
+    return { k, type: typeof v };
+  });
+}
+
 function bodyKeys(body: unknown): string[] {
   if (body && typeof body === "object") return Object.keys(body as Record<string, unknown>);
   return [];
@@ -57,7 +70,7 @@ export async function getPrognosisToken(): Promise<string> {
   const body = await res.json().catch(() => null);
 
   log.info(
-    { status: res.status, keys: bodyKeys(body) },
+    { status: res.status, keys: bodyKeys(body), shape: bodyShape(body) },
     "prognosis.token.response",
   );
 
