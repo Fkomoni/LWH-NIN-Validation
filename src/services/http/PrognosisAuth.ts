@@ -5,10 +5,10 @@ import { log } from "@/lib/logger";
  * Prognosis login + short-lived token cache.
  *
  * Endpoint: POST {PROGNOSIS_BASE_URL}/ApiUsers/Login
- * Body shape / field names are provider-defined — we honour the most
- * common Prognosis-style payloads (Username/Password) and read any of
- * the typical token keys from the response. If the real body differs,
- * only this file changes.
+ * Body shape is provider-defined — we honour the common Prognosis-style
+ * payloads (Username/Password) and read any of the typical token keys
+ * from the response. Status + response-body keys are logged on every
+ * call so a wrong body shape is immediately visible in ops logs.
  */
 
 interface Token {
@@ -26,9 +26,14 @@ function readToken(body: unknown): string | undefined {
     const v = b[k];
     if (typeof v === "string" && v.length) return v;
   }
-  // Some APIs wrap it: { data: { token: "..." } }
   if (b.data && typeof b.data === "object") return readToken(b.data);
+  if (b.result && typeof b.result === "object") return readToken(b.result);
   return undefined;
+}
+
+function bodyKeys(body: unknown): string[] {
+  if (body && typeof body === "object") return Object.keys(body as Record<string, unknown>);
+  return [];
 }
 
 export async function getPrognosisToken(): Promise<string> {
@@ -41,18 +46,28 @@ export async function getPrognosisToken(): Promise<string> {
   if (!base || !username || !password) {
     throw new Error("prognosis.token.missing-config");
   }
+
   const res = await fetch(`${base}/ApiUsers/Login`, {
     method: "POST",
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify({ Username: username, Password: password }),
   });
+  const body = await res.json().catch(() => null);
+
+  log.info(
+    { status: res.status, keys: bodyKeys(body) },
+    "prognosis.token.response",
+  );
+
   if (!res.ok) {
     log.error({ status: res.status }, "prognosis.token.http-fail");
     throw new Error(`prognosis.token.http-${res.status}`);
   }
-  const body = (await res.json().catch(() => ({}))) as unknown;
   const token = readToken(body);
-  if (!token) throw new Error("prognosis.token.no-token");
+  if (!token) {
+    log.error({ keys: bodyKeys(body) }, "prognosis.token.no-token-in-body");
+    throw new Error("prognosis.token.no-token");
+  }
   cached = { accessToken: token, fetchedAt: Date.now() };
   return token;
 }

@@ -20,7 +20,7 @@ export function AuthStartForm() {
       <Field
         id="enrolleeId"
         label="Enrollee ID"
-        hint="e.g. LWH-0001. Case-insensitive."
+        hint="Enter your full Enrollee ID including any / suffix. Case-insensitive."
         required
         error={err.enrolleeId}
       >
@@ -28,7 +28,6 @@ export function AuthStartForm() {
           name="enrolleeId"
           autoComplete="off"
           inputMode="text"
-          placeholder="LWH-0001"
           required
         />
       </Field>

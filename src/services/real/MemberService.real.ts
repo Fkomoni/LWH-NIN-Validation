@@ -4,23 +4,21 @@ import type { Household, Person, Relationship } from "@/types/domain";
 import {
   getEnrolleeBioData,
   getEnrolleeDependants,
+  PrognosisProviderError,
   type PrognosisMember,
 } from "../http/PrognosisMemberClient";
 import { dobMatches } from "@/lib/validation/dob";
 import { isLocked } from "@/server/lockout";
 import { maskPhone } from "@/lib/mask";
+import { log } from "@/lib/logger";
 
 /**
- * Production MemberService. Reads from Prognosis enrollee endpoints.
+ * Production MemberService backed by Prognosis.
  *
- * Phase-2 gaps (tracked in open-questions.md):
- *   - the Prognosis *update* endpoint for writing the verified NIN is
- *     not yet confirmed — `PrognosisService.upsertMemberNin` currently
- *     posts to the mock until we receive the endpoint
- *   - authenticateByPrincipalNin currently re-reads the bio record to
- *     compare the user-supplied DOB with Prognosis's DOB; if Prognosis
- *     returns the real DOB only after NIMC verification, we'll need a
- *     second lookup there too
+ * Important: we surface PROVIDER_ERROR (not NOT_FOUND) when the
+ * underlying Prognosis call fails. NOT_FOUND triggers the lockout
+ * counter; PROVIDER_ERROR does not. This means a Prognosis outage
+ * cannot cause a real enrollee to get locked out by accident.
  */
 
 function relationshipFromString(raw?: string): Relationship {
@@ -45,44 +43,64 @@ function toPerson(p: PrognosisMember, isPrincipal: boolean): Person {
   };
 }
 
-async function buildHousehold(enrolleeId: string): Promise<Household | null> {
-  const principal = await getEnrolleeBioData(enrolleeId);
-  if (!principal) return null;
+type HouseholdResult =
+  | { kind: "ok"; household: Household }
+  | { kind: "not-found" }
+  | { kind: "provider-error" };
+
+async function loadHouseholdRaw(enrolleeId: string): Promise<HouseholdResult> {
+  let principal: PrognosisMember | null;
+  try {
+    principal = await getEnrolleeBioData(enrolleeId);
+  } catch (err) {
+    if (err instanceof PrognosisProviderError) {
+      log.error({ err: err.message, status: err.status, enrolleeId }, "member.bio.provider-error");
+      return { kind: "provider-error" };
+    }
+    log.error({ err: String(err), enrolleeId }, "member.bio.unexpected");
+    return { kind: "provider-error" };
+  }
+  if (!principal) return { kind: "not-found" };
   const deps = await getEnrolleeDependants(enrolleeId);
   return {
-    principal: toPerson(principal, true),
-    dependants: deps.map((d) => toPerson(d, false)),
+    kind: "ok",
+    household: {
+      principal: toPerson(principal, true),
+      dependants: deps.map((d) => toPerson(d, false)),
+    },
   };
 }
 
 export const realMemberService: MemberService = {
   async authenticateByDob({ enrolleeId, dob }): Promise<MemberLookupResult> {
     if (await isLocked(enrolleeId)) return { ok: false, reason: "LOCKED" };
-    const household = await buildHousehold(enrolleeId);
-    if (!household) return { ok: false, reason: "NOT_FOUND" };
-    if (!dobMatches(household.principal.dob, dob)) {
+
+    const res = await loadHouseholdRaw(enrolleeId);
+    if (res.kind === "provider-error") return { ok: false, reason: "PROVIDER_ERROR" };
+    if (res.kind === "not-found") return { ok: false, reason: "NOT_FOUND" };
+
+    if (!dobMatches(res.household.principal.dob, dob)) {
       return { ok: false, reason: "DOB_MISMATCH" };
     }
-    return { ok: true, household };
+    return { ok: true, household: res.household };
   },
 
   async authenticateByPrincipalNin({ enrolleeId, dob }): Promise<MemberLookupResult> {
-    // We rely on NIMC to supply the DOB-from-NIN; the portal action is
-    // responsible for comparing that DOB with the user-supplied `dob`
-    // before it calls back into this service. Here we simply confirm
-    // the enrollee exists and the user-supplied DOB matches Prognosis.
     if (await isLocked(enrolleeId)) return { ok: false, reason: "LOCKED" };
-    const household = await buildHousehold(enrolleeId);
-    if (!household) return { ok: false, reason: "NOT_FOUND" };
-    if (!dobMatches(household.principal.dob, dob)) {
+
+    const res = await loadHouseholdRaw(enrolleeId);
+    if (res.kind === "provider-error") return { ok: false, reason: "PROVIDER_ERROR" };
+    if (res.kind === "not-found") return { ok: false, reason: "NOT_FOUND" };
+
+    if (!dobMatches(res.household.principal.dob, dob)) {
       return { ok: false, reason: "DOB_MISMATCH" };
     }
-    return { ok: true, household };
+    return { ok: true, household: res.household };
   },
 
   async loadHousehold(enrolleeId) {
-    const h = await buildHousehold(enrolleeId);
-    if (!h) throw new Error("household-not-found");
-    return h;
+    const res = await loadHouseholdRaw(enrolleeId);
+    if (res.kind !== "ok") throw new Error("household-not-found");
+    return res.household;
   },
 };
