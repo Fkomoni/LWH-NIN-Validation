@@ -1,6 +1,8 @@
 # Render blueprint for the LWH NIN Update/Verification portal.
-# Confirmed host: Render (not Vercel). Update SERVICE_NAME + PLAN + REGION
-# before first deploy.
+# Confirmed host: Render. Day-one runs without Postgres — all state
+# (OTP, rate limit, lockout, manual-review queue, Prognosis outbox)
+# lives in in-memory KV. Phase 3 re-adds a managed Postgres block here
+# for audit persistence and the manual-review table.
 
 services:
   - type: web
@@ -18,10 +20,6 @@ services:
         value: "22"
       - key: NEXT_PUBLIC_MOCKS_ENABLED
         value: "false"
-      - key: DATABASE_URL
-        fromDatabase:
-          name: lwh-nin-pg
-          property: connectionString
       # App-level secrets — set in the Render dashboard.
       - key: AUTH_SECRET
         generateValue: true
@@ -58,14 +56,3 @@ services:
         sync: false
       - key: LOG_LEVEL
         value: info
-
-databases:
-  - name: lwh-nin-pg
-    databaseName: lwh_nin
-    # Render retired the legacy "starter" DB tier in 2026. Use the
-    # cheapest current paid tier for stability; upgrade later from the
-    # dashboard without redeploying. Other options: basic-1gb, basic-4gb,
-    # pro-4gb, pro-8gb, pro-16gb, pro-32gb.
-    plan: basic-256mb
-    region: oregon
-    ipAllowList: []
