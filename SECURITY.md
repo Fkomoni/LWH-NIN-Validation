@@ -131,7 +131,9 @@ Done ✅ · Partial ⚠️ · Phase 3+ ⏳
 Full manifest: `package.json` + `pnpm-lock.yaml` (pinned).
 
 Runtime:
-- Next.js 15.1.3, React 19
+- Next.js 15.5.15 (patched for GHSA-9qr9-h5gf-34mp RCE and
+  GHSA-f82v-jwr5-mffw middleware-auth-bypass)
+- React 19
 - Prisma 6 (client scaffolded; no DB queries in production path today)
 - Zod (form + payload validation)
 - Pino (structured logging)
@@ -144,8 +146,18 @@ Security-sensitive libraries and their purpose:
 | `react-hook-form`             | Form state (no DOM innerHTML manipulation)     |
 | `tailwindcss`                 | Static class generation at build time          |
 
-No dependency with known CVE at time of writing. CI should add
-`pnpm audit` as a Phase 3 task.
+### Supply-chain hygiene
+
+- **`pnpm audit --audit-level high`** runs on every PR / push via CI
+  (`.github/workflows/ci.yml`). A merge is blocked if any
+  high-or-critical advisory touches the tree.
+- **Dependabot** (`.github/dependabot.yml`) opens a weekly grouped
+  PR for patch + minor bumps on Monday 08:00 Africa/Lagos, plus a
+  monthly run for GitHub Actions versions. Security advisories come
+  in immediately, outside the weekly slot.
+- **Next.js major upgrades** are explicitly excluded from the grouped
+  PR so they go in deliberately.
+- Current audit state at time of writing: **0 vulnerabilities**.
 
 ---
 
@@ -155,7 +167,7 @@ No dependency with known CVE at time of writing. CI should add
 | ------------------------------------------ | ------------------------------------------------------------------- | -------------- |
 | KV is in-memory (no Upstash Redis wired)   | Rate limits, OTP, outbox reset on each deploy. Single-instance OK. | Phase 3        |
 | No Postgres persistence yet                | Audit log + manual reviews live in KV → volatile                   | Phase 3        |
-| Admin auth = shared dev password           | Acceptable for MVP; replace with Leadway SSO / per-user accounts    | Phase 2/3      |
+| Admin auth = shared dev password           | Acceptable for MVP; visible "Development access only" banner on `/admin/login`; replace with Leadway SSO / per-user accounts | Phase 2/3      |
 | Sentry DSN not wired                       | Errors visible only in Render log tail                             | Phase 3        |
 | OpenTelemetry not wired                    | No distributed tracing beyond `traceId` field                      | Phase 3        |
 | Turnstile keys not set                     | Helper is in place (`src/server/turnstile.ts`) and no-ops          | Phase 2        |

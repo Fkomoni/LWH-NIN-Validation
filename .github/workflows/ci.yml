@@ -24,6 +24,10 @@ jobs:
           cache: pnpm
       - name: Install deps
         run: pnpm install --frozen-lockfile
+      - name: Audit dependencies (fail on high or critical)
+        # Blocks merge on any high/critical advisory across the tree.
+        # Moderate advisories still show in the log but don't fail.
+        run: pnpm audit --audit-level high
       - name: Prisma generate
         run: pnpm exec prisma generate --schema=prisma/schema.prisma
       - name: Lint
