@@ -1,0 +1,50 @@
+"use client";
+
+import { useActionState } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Field } from "@/components/ui/field";
+import { authByPrincipalNin, type PrincipalNinState } from "@/server/actions/auth";
+
+const initial: PrincipalNinState = { status: "idle" };
+
+export function PrincipalNinForm({ enrolleeId }: { enrolleeId: string }) {
+  const [state, action, pending] = useActionState(authByPrincipalNin, initial);
+  const err = state.status === "error" ? state.fieldErrors ?? {} : {};
+
+  return (
+    <form action={action} className="space-y-4" noValidate>
+      <input type="hidden" name="enrolleeId" value={enrolleeId} />
+      <Field id="nin" label="Your NIN" hint="11 digits, numbers only." required error={err.nin}>
+        <Input
+          name="nin"
+          inputMode="numeric"
+          pattern="\d{11}"
+          maxLength={11}
+          placeholder="12345678901"
+          required
+        />
+      </Field>
+      <Field id="dob" label="Date of birth" required error={err.dob}>
+        <Input name="dob" type="date" required />
+      </Field>
+
+      {state.status === "fail" ? (
+        <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">
+          We couldn't verify those details. Please double-check and try again.
+        </p>
+      ) : null}
+      {state.status === "locked" ? (
+        <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">
+          For security, we've paused this account. Please contact Leadway Support.
+        </p>
+      ) : null}
+
+      <div className="flex justify-end">
+        <Button type="submit" disabled={pending} size="lg">
+          {pending ? "Checking…" : "Validate with NIN"}
+        </Button>
+      </div>
+    </form>
+  );
+}
