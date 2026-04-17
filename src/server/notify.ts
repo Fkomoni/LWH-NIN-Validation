@@ -56,17 +56,39 @@ export async function notifyNinValidated(args: {
   principalEnrolleeId: string;
   beneficiaryName: string;
 }): Promise<void> {
-  if (!appConfig.sendReceiptEmail) return;
+  if (!appConfig.sendReceiptEmail) {
+    log.info({}, "notify.nin-validated.disabled");
+    return;
+  }
 
   try {
+    log.info({ enrolleeId: args.principalEnrolleeId }, "notify.nin-validated.start");
+
     const principalBio = await getEnrolleeBioData(args.principalEnrolleeId);
-    if (!principalBio?.email) {
-      log.info(
+    if (!principalBio) {
+      log.warn(
         { enrolleeId: args.principalEnrolleeId },
+        "notify.nin-validated.bio-lookup-failed",
+      );
+      return;
+    }
+
+    if (!principalBio.email) {
+      log.info(
+        { enrolleeId: args.principalEnrolleeId, hasBio: true, fullName: !!principalBio.fullName },
         "notify.nin-validated.no-email-on-file",
       );
       return;
     }
+
+    log.info(
+      {
+        enrolleeId: args.principalEnrolleeId,
+        emailPrefix: principalBio.email.split("@")[0]?.slice(0, 2) + "***",
+        emailDomain: principalBio.email.split("@")[1] ?? null,
+      },
+      "notify.nin-validated.dispatching",
+    );
 
     const res = await getServices().notification.send({
       kind: "nin.validated.email",
@@ -76,7 +98,13 @@ export async function notifyNinValidated(args: {
         beneficiaryName: args.beneficiaryName,
       },
     });
-    if (!res.ok) {
+
+    if (res.ok) {
+      log.info(
+        { enrolleeId: args.principalEnrolleeId },
+        "notify.nin-validated.sent",
+      );
+    } else {
       log.error(
         { reason: res.reason, enrolleeId: args.principalEnrolleeId },
         "notify.nin-validated.fail",

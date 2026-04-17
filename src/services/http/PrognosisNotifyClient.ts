@@ -25,16 +25,33 @@ async function authedPost<T = unknown>(path: string, body: unknown): Promise<T |
   headers.set("accept", "application/json");
   headers.set("content-type", "application/json");
   headers.set("Authorization", `Bearer ${token}`);
+
   const res = await fetch(`${base}${path}`, {
     method: "POST",
     headers,
     body: JSON.stringify(body),
   });
-  if (!res.ok) {
-    log.error({ path, status: res.status }, "prognosis.notify.http-fail");
-    return null;
-  }
-  return (await res.json().catch(() => null)) as T | null;
+  const parsed = (await res.json().catch(() => null)) as T | null;
+
+  log.info(
+    {
+      path,
+      status: res.status,
+      ok: res.ok,
+      bodyKeys: parsed && typeof parsed === "object" ? Object.keys(parsed as object) : [],
+      // Surface common top-level flags/messages so we see whether a
+      // 200 actually succeeded at the Prognosis layer.
+      success: (parsed as { success?: unknown })?.success ?? null,
+      statusField: (parsed as { status?: unknown })?.status ?? null,
+      message: (parsed as { message?: unknown; Message?: unknown })?.message
+        ?? (parsed as { Message?: unknown })?.Message
+        ?? null,
+    },
+    "prognosis.notify.response",
+  );
+
+  if (!res.ok) return null;
+  return parsed;
 }
 
 export interface SendSmsArgs {
