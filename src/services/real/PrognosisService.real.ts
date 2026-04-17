@@ -141,21 +141,22 @@ export const realPrognosisService: PrognosisService = {
       //   1. Authorization: Bearer <token>   (identity — same as reads)
       //   2. A SECONDARY header carrying the key (gateway-level check).
       //
-      // Evidence from live probing:
-      //   no secondary header            → 401 "API Key is missing"
-      //   X-API-Key: <raw token>         → 401 "Invalid API Key"
-      //   X-API-Key: Bearer <token>      → (trying this now)
-      //
       // Configure via env:
       //   PROGNOSIS_API_KEY_HEADER       header name, default X-API-Key
-      //                                   (Authorization is ignored — that
-      //                                   slot already carries the bearer)
+      //                                   (value of "Authorization" is
+      //                                   auto-ignored — we would clobber
+      //                                   the bearer slot — and we fall
+      //                                   back to X-API-Key)
       //   PROGNOSIS_API_KEY              static value override. When
       //                                   unset, we forward the dynamic
       //                                   token from /ApiUsers/Login.
       //   PROGNOSIS_API_KEY_BEARER       "false" to send raw token;
       //                                   default "true" prefixes Bearer.
-      const headerName = process.env.PROGNOSIS_API_KEY_HEADER ?? "X-API-Key";
+      const envHeader = process.env.PROGNOSIS_API_KEY_HEADER;
+      const headerName =
+        envHeader && envHeader.toLowerCase() !== "authorization"
+          ? envHeader
+          : "X-API-Key";
       const useBearer = (process.env.PROGNOSIS_API_KEY_BEARER ?? "true") !== "false";
       const rawValue = process.env.PROGNOSIS_API_KEY ?? token;
       const apiKeyValue = useBearer ? `Bearer ${rawValue}` : rawValue;
@@ -165,9 +166,7 @@ export const realPrognosisService: PrognosisService = {
       headers.set("content-type", "application/json");
       headers.set("Authorization", `Bearer ${token}`);
       headers.set("Idempotency-Key", payload.txnRef);
-      if (headerName.toLowerCase() !== "authorization") {
-        headers.set(headerName, apiKeyValue);
-      }
+      headers.set(headerName, apiKeyValue);
 
       log.info(
         {
@@ -176,11 +175,15 @@ export const realPrognosisService: PrognosisService = {
           headerNames: [...headers.keys()],
           authorizationLen: headers.get("Authorization")?.length ?? 0,
           authorizationHead: headers.get("Authorization")?.slice(0, 12) ?? null,
-          keyHeaderName: headerName,
+          // Shortened field names so the PII auto-masker (which zaps any
+          // key containing "name") doesn't blank the actual header name.
+          keyHeader: headerName,
           keyHeaderLen: headers.get(headerName)?.length ?? 0,
           keyHeaderHead: headers.get(headerName)?.slice(0, 12) ?? null,
           keyUsesBearer: useBearer,
           keyFromEnv: Boolean(process.env.PROGNOSIS_API_KEY),
+          envOverrideIgnored:
+            Boolean(envHeader) && envHeader?.toLowerCase() === "authorization",
         },
         "prognosis.update.headers",
       );
