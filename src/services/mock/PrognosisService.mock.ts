@@ -1,25 +1,25 @@
+import "server-only";
 import type { PrognosisService, PrognosisUpsertResult } from "../types";
+import { upsertMemberNin } from "../http/PrognosisClient";
+import { log } from "@/lib/logger";
 
-const seen = new Map<string, PrognosisUpsertResult>();
-
+/**
+ * PrognosisService — delegates to the HTTP client (intercepted by MSW
+ * in Phase 1). Returns the result shape expected by the orchestrator;
+ * retries live in the outbox (src/server/outbox.ts), not here.
+ */
 export const mockPrognosisService: PrognosisService = {
-  async upsertMemberNin(payload) {
-    const existing = seen.get(payload.txnRef);
-    if (existing) return existing;
-
-    // Simulate a flaky downstream once in a while when the payload signals it.
-    if (payload.memberId.endsWith("-flaky")) {
-      const r: PrognosisUpsertResult = {
-        ok: false,
-        reason: "PROVIDER_ERROR",
-        retryable: true,
-      };
-      // Don't cache transient errors.
-      return r;
-    }
-
-    const r: PrognosisUpsertResult = { ok: true, txnRef: payload.txnRef };
-    seen.set(payload.txnRef, r);
-    return r;
+  async upsertMemberNin(payload): Promise<PrognosisUpsertResult> {
+    const res = await upsertMemberNin(payload);
+    if (res.ok) return { ok: true, txnRef: res.txnRef };
+    log.warn(
+      { txnRef: res.txnRef, error: res.error, retryable: res.retryable },
+      "prognosis.upsert.fail",
+    );
+    return {
+      ok: false,
+      reason: res.error === "DUPLICATE" ? "DUPLICATE" : "PROVIDER_ERROR",
+      retryable: res.retryable,
+    };
   },
 };

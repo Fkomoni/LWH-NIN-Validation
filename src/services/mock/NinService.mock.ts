@@ -7,6 +7,7 @@ import { isValidNinFormat } from "@/lib/validation/nin";
 import { scoreNameMatch } from "@/lib/validation/scoreName";
 import { dobMatches } from "@/lib/validation/dob";
 import { supportRef, traceId } from "@/lib/ids";
+import { enqueueReview } from "@/server/admin/reviews";
 
 /**
  * Phase-1 NinService implementation. It performs:
@@ -102,6 +103,14 @@ export const mockNinService: NinService = {
       };
     } else if (tier === "manual-review") {
       beneficiary.ninStatus = "MANUAL_REVIEW";
+      await enqueueReview({
+        enrolleeId,
+        memberId: beneficiaryId,
+        memberName: beneficiary.fullName,
+        nameScore: score,
+        verifiedFullName: nimc.fullName,
+        reason: `name-score=${score.toFixed(2)}`,
+      });
       result = {
         outcome: "REVIEW_SOFT",
         nameScore: score,

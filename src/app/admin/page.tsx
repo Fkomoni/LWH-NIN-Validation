@@ -1,4 +1,6 @@
+import Link from "next/link";
 import { PageShell } from "@/components/layout/PageShell";
+import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 
 export const metadata = { title: "Admin — Leadway Health" };
@@ -20,6 +22,11 @@ export default function AdminLandingPage() {
           <p className="text-sm text-muted-foreground">
             Search enrollees, triage manual reviews, unlock accounts, export reports.
           </p>
+          <div className="pt-2">
+            <Button asChild>
+              <Link href="/admin/login">Sign in</Link>
+            </Button>
+          </div>
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">

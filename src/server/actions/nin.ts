@@ -1,5 +1,6 @@
 "use server";
 
+import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { beneficiaryNinSubmitSchema } from "@/schemas/nin";
 import { getServices } from "@/services";
@@ -7,23 +8,37 @@ import { requireSession } from "@/server/session";
 import { audit } from "@/server/audit";
 import { idempotencyKey, traceId, txnRef } from "@/lib/ids";
 import { maskNin } from "@/lib/mask";
+import { rateLimit } from "@/server/rateLimit";
+import { enqueuePrognosis } from "@/server/outbox";
 import type { NinValidationResult } from "@/types/domain";
 
 export interface NinSubmitResult {
   beneficiaryId: string;
   result: NinValidationResult;
+  retryScheduled?: boolean;
 }
 
-/**
- * Validate a single beneficiary's NIN and — on auto-pass — forward to
- * Prognosis. Invoked per row from the household screen; callers can also
- * call it in a loop for the "Validate all" button.
- */
+/** Validate a single beneficiary's NIN end-to-end. */
 export async function submitBeneficiaryNin(input: unknown): Promise<NinSubmitResult> {
   const session = await requireSession();
   const parsed = beneficiaryNinSubmitSchema.parse(input);
   const key = parsed.idempotencyKey ?? idempotencyKey();
   const tid = traceId();
+
+  const limit = await rateLimit.ninValidateEnrollee(session.enrolleeId);
+  if (!limit.ok) {
+    return {
+      beneficiaryId: parsed.beneficiaryId,
+      result: {
+        outcome: "FAIL_HARD",
+        message:
+          "You've tried to validate too many times recently. Please wait an hour and try again.",
+      },
+    };
+  }
+
+  const h = await headers();
+  const ip = h.get("x-client-ip") ?? "0.0.0.0";
 
   const svc = getServices();
   const result = await svc.nin.validateForBeneficiary({
@@ -39,21 +54,24 @@ export async function submitBeneficiaryNin(input: unknown): Promise<NinSubmitRes
     actorId: session.enrolleeId,
     memberId: parsed.beneficiaryId,
     traceId: tid,
+    ip,
     payload: { nin: maskNin(parsed.nin), score: result.nameScore, dob: result.dobMatched },
   });
 
+  let retryScheduled = false;
   if (result.outcome === "PASS_AUTO" && result.verifiedFullName && result.dobFromNin) {
     const ref = txnRef();
-    const write = await svc.prognosis.upsertMemberNin({
+    const payload = {
       memberId: parsed.beneficiaryId,
       nin: parsed.nin,
       verifiedFullName: result.verifiedFullName,
       dobFromNin: result.dobFromNin,
-      validationStatus: "VALIDATED",
+      validationStatus: "VALIDATED" as const,
       validatedAt: new Date().toISOString(),
-      source: "self-service-portal",
+      source: "self-service-portal" as const,
       txnRef: ref,
-    });
+    };
+    const write = await svc.prognosis.upsertMemberNin(payload);
     await audit({
       action: `prognosis.upsert.${write.ok ? "ok" : "fail"}`,
       actorType: "system",
@@ -61,8 +79,12 @@ export async function submitBeneficiaryNin(input: unknown): Promise<NinSubmitRes
       traceId: tid,
       payload: { txnRef: ref },
     });
+    if (!write.ok && write.retryable) {
+      await enqueuePrognosis(payload);
+      retryScheduled = true;
+    }
   }
 
   revalidatePath("/household");
-  return { beneficiaryId: parsed.beneficiaryId, result };
+  return { beneficiaryId: parsed.beneficiaryId, result, retryScheduled };
 }
