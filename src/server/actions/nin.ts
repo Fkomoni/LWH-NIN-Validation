@@ -2,6 +2,7 @@
 
 import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { beneficiaryNinSubmitSchema } from "@/schemas/nin";
 import { getServices } from "@/services";
 import { requireSession } from "@/server/session";
@@ -12,15 +13,28 @@ import { rateLimit } from "@/server/rateLimit";
 import { enqueuePrognosis } from "@/server/outbox";
 import { notifyNinValidated } from "@/server/notify";
 import { appConfig } from "@/config/app";
+import { log } from "@/lib/logger";
 import type { NinValidationResult } from "@/types/domain";
 
 export interface NinSubmitResult {
   beneficiaryId: string;
   result: NinValidationResult;
-  retryScheduled?: boolean;
+  /** The Prognosis write is still happening in the background. */
+  writeQueued?: boolean;
 }
 
-/** Validate a single beneficiary's NIN end-to-end. */
+/**
+ * Validate one beneficiary's NIN.
+ *
+ * Once NIMC (via Qore) says the NIN matches, we return to the client
+ * immediately and run the Prognosis update in `after()`. Rationale
+ * (client, 17 Apr 2026): "once NIN is verified as correct, there is no
+ * need keeping the client waiting — submit it, backend does the work."
+ *
+ * Safety net: every PASS_AUTO payload is also enqueued to the outbox
+ * before we return, so if the `after()` call crashes or the Prognosis
+ * write fails retryably, the outbox drain will eventually deliver it.
+ */
 export async function submitBeneficiaryNin(input: unknown): Promise<NinSubmitResult> {
   const session = await requireSession();
   const parsed = beneficiaryNinSubmitSchema.parse(input);
@@ -60,7 +74,7 @@ export async function submitBeneficiaryNin(input: unknown): Promise<NinSubmitRes
     payload: { nin: maskNin(parsed.nin), score: result.nameScore, dob: result.dobMatched },
   });
 
-  let retryScheduled = false;
+  let writeQueued = false;
   if (result.outcome === "PASS_AUTO" && result.verifiedFullName && result.dobFromNin) {
     const ref = txnRef();
     const payload = {
@@ -73,28 +87,33 @@ export async function submitBeneficiaryNin(input: unknown): Promise<NinSubmitRes
       source: "self-service-portal" as const,
       txnRef: ref,
     };
-    const write = await svc.prognosis.upsertMemberNin(payload);
-    await audit({
-      action: `prognosis.upsert.${write.ok ? "ok" : "fail"}`,
-      actorType: "system",
-      memberId: parsed.beneficiaryId,
-      traceId: tid,
-      payload: { txnRef: ref },
-    });
-    if (!write.ok && write.retryable) {
-      await enqueuePrognosis(payload);
-      retryScheduled = true;
-    }
 
-    if (appConfig.sendReceiptEmail) {
-      // Best-effort; never block the flow. Real email path falls back
-      // silently when the member has no email on file.
-      await notifyNinValidated({
-        fullName: result.verifiedFullName,
-      }).catch(() => undefined);
-    }
+    // Persist to the outbox first — this is the only thing that MUST
+    // happen before the response returns, to guarantee durability.
+    await enqueuePrognosis(payload);
+    writeQueued = true;
+
+    // The actual Prognosis write + receipt email run AFTER the response
+    // is streamed to the browser.
+    after(async () => {
+      try {
+        const write = await svc.prognosis.upsertMemberNin(payload);
+        await audit({
+          action: `prognosis.upsert.${write.ok ? "ok" : "fail"}`,
+          actorType: "system",
+          memberId: parsed.beneficiaryId,
+          traceId: tid,
+          payload: { txnRef: ref },
+        });
+        if (appConfig.sendReceiptEmail && result.verifiedFullName) {
+          await notifyNinValidated({ fullName: result.verifiedFullName }).catch(() => undefined);
+        }
+      } catch (err) {
+        log.error({ err: String(err), txnRef: ref }, "after.prognosis.write.fail");
+      }
+    });
   }
 
   revalidatePath("/household");
-  return { beneficiaryId: parsed.beneficiaryId, result, retryScheduled };
+  return { beneficiaryId: parsed.beneficiaryId, result, writeQueued };
 }

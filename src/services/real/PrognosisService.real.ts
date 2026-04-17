@@ -53,9 +53,35 @@ interface UpdateMemberDataResult {
   Data?: unknown[];
 }
 
+/**
+ * Prognosis writes use a different response envelope from reads.
+ *   Success path:  { status: 200, result: { Success, Message, NewId, Data } }
+ *   Auth failure:  { success: false, message: "…", timestamp: "…" }
+ * So we look at both shapes when deciding the outcome.
+ */
 interface UpdateMemberDataResponse {
   status?: number;
   result?: UpdateMemberDataResult;
+  // Alternate (flat) envelope — used by the auth gateway
+  success?: boolean;
+  message?: string;
+  timestamp?: string;
+}
+
+function readOutcome(parsed: UpdateMemberDataResponse | null): {
+  success?: boolean;
+  message?: string;
+  newId?: string | number;
+} {
+  if (!parsed) return {};
+  if (parsed.result) {
+    return {
+      success: parsed.result.Success,
+      message: parsed.result.Message,
+      newId: parsed.result.NewId,
+    };
+  }
+  return { success: parsed.success, message: parsed.message };
 }
 
 function messageSuggestsDuplicate(msg?: string): boolean {
@@ -121,19 +147,30 @@ export const realPrognosisService: PrognosisService = {
         body: JSON.stringify(body),
       });
       const parsed = (await res.json().catch(() => null)) as UpdateMemberDataResponse | null;
+      const outcome = readOutcome(parsed);
 
       log.info(
         {
           path: PATH,
           status: res.status,
           keys: parsed && typeof parsed === "object" ? Object.keys(parsed) : [],
-          resultSuccess: parsed?.result?.Success,
-          resultMessage: parsed?.result?.Message,
+          success: outcome.success,
+          message: outcome.message,
           txnRef: payload.txnRef,
         },
         "prognosis.update.response",
       );
 
+      if (res.status === 401 || res.status === 403) {
+        // Write endpoint is rejecting our bearer token. Not retryable —
+        // the outbox will keep bouncing off it until creds/scope are
+        // corrected.
+        log.error(
+          { status: res.status, message: outcome.message, txnRef: payload.txnRef },
+          "prognosis.update.unauthorized",
+        );
+        return { ok: false, reason: "PROVIDER_ERROR", retryable: false };
+      }
       if (res.status >= 500) {
         log.error(
           { status: res.status, txnRef: payload.txnRef },
@@ -146,21 +183,15 @@ export const realPrognosisService: PrognosisService = {
       }
       if (!res.ok) {
         log.error(
-          { status: res.status, message: parsed?.result?.Message, txnRef: payload.txnRef },
+          { status: res.status, message: outcome.message, txnRef: payload.txnRef },
           "prognosis.update.4xx",
         );
         return { ok: false, reason: "PROVIDER_ERROR", retryable: true };
       }
 
-      const result = parsed?.result;
-      if (!result) {
-        log.error({ status: res.status, txnRef: payload.txnRef }, "prognosis.update.bad-body");
-        return { ok: false, reason: "PROVIDER_ERROR", retryable: true };
-      }
-
-      if (result.Success === true) {
+      if (outcome.success === true) {
         log.info(
-          { memberId: payload.memberId, newId: result.NewId, txnRef: payload.txnRef },
+          { memberId: payload.memberId, newId: outcome.newId, txnRef: payload.txnRef },
           "prognosis.update.ok",
         );
         return { ok: true, txnRef: payload.txnRef };
@@ -168,10 +199,10 @@ export const realPrognosisService: PrognosisService = {
 
       // Logical failure — log the Message and do NOT retry by default.
       log.warn(
-        { memberId: payload.memberId, message: result.Message, txnRef: payload.txnRef },
+        { memberId: payload.memberId, message: outcome.message, txnRef: payload.txnRef },
         "prognosis.update.rejected",
       );
-      if (messageSuggestsDuplicate(result.Message)) {
+      if (messageSuggestsDuplicate(outcome.message)) {
         return { ok: false, reason: "DUPLICATE", retryable: false };
       }
       return { ok: false, reason: "PROVIDER_ERROR", retryable: false };
