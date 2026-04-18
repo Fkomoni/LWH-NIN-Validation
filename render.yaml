@@ -29,6 +29,11 @@ services:
         generateValue: true
       - key: ADMIN_BOOTSTRAP_PASSWORD
         sync: false
+      # scrypt-encoded bootstrap credential, REQUIRED in production.
+      # Format: scrypt$<Nlog2>$<saltB64>$<keyB64>. Generate with
+      #   node -e "import('./src/lib/secrets').then(m => console.log(m.hashAdminPassword('pw')))"
+      - key: ADMIN_BOOTSTRAP_PASSWORD_HASH
+        sync: false
       # Comma-separated list of admin emails permitted to sign in with
       # the bootstrap password. REQUIRED in live production.
       - key: ADMIN_ALLOWED_EMAILS

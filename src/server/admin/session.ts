@@ -1,7 +1,7 @@
 import "server-only";
 import { cookies } from "next/headers";
-import { createHash, createHmac, timingSafeEqual } from "node:crypto";
-import { adminAllowList, requireAdminBootstrapPassword, requireSecret } from "@/lib/secrets";
+import { createHmac, timingSafeEqual } from "node:crypto";
+import { adminAllowList, requireSecret, verifyAdminBootstrapPassword } from "@/lib/secrets";
 
 /**
  * Dev-only admin session. Phase 2 replaces with NextAuth v5 + Leadway
@@ -84,10 +84,11 @@ export async function clearAdminSession(): Promise<void> {
 
 /**
  * Dev allow-list. Replace with a DB lookup + per-admin bcrypt hash in
- * Phase 2. Uses a timing-safe SHA-256 digest compare so the length or
- * early-mismatch of the bootstrap password can't be inferred from
- * response time. Throws in live production if ADMIN_BOOTSTRAP_PASSWORD
- * or ADMIN_ALLOWED_EMAILS is missing.
+ * Phase 2. In live production the password comparison uses scrypt
+ * against ADMIN_BOOTSTRAP_PASSWORD_HASH (see src/lib/secrets.ts). In
+ * dev/test it falls back to a timing-safe compare against the
+ * deterministic dev secret. Throws in live production if
+ * ADMIN_BOOTSTRAP_PASSWORD_HASH or ADMIN_ALLOWED_EMAILS is missing.
  *
  * The email is matched against ADMIN_ALLOWED_EMAILS (comma-separated,
  * lower-cased). The password comparison always runs so the response
@@ -95,13 +96,10 @@ export async function clearAdminSession(): Promise<void> {
  */
 export function findDevAdmin(email: string, password: string): AdminSession | null {
   const normalized = email.trim().toLowerCase();
-  const want = requireAdminBootstrapPassword();
 
   // Always run the password compare BEFORE deciding, so timing doesn't
   // leak whether the email is on the allow-list.
-  const got = createHash("sha256").update(password).digest();
-  const exp = createHash("sha256").update(want).digest();
-  const passwordOk = got.length === exp.length && timingSafeEqual(got, exp);
+  const passwordOk = verifyAdminBootstrapPassword(password);
 
   const allow = adminAllowList();
   // Empty set is only reachable in dev/mock (see adminAllowList); treat

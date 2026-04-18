@@ -1,5 +1,5 @@
 import "server-only";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { hostname } from "node:os";
 
 /**
@@ -50,19 +50,76 @@ export function requireSecret(name: string, opts: { minLen?: number } = {}): str
 }
 
 /**
- * For a plaintext password (ADMIN_BOOTSTRAP_PASSWORD): in production
- * we refuse to authenticate when unset. In dev we surface the derived
- * value once so the developer knows what to type.
+ * Verify a candidate admin bootstrap password.
+ *
+ * In production we require ADMIN_BOOTSTRAP_PASSWORD_HASH — an
+ * scrypt-derived, timing-safe-comparable digest with the format:
+ *
+ *     scrypt$<Nlog2>$<saltB64>$<keyB64>
+ *
+ * Generated once off-line with `node scripts/hash-admin-password.mjs`
+ * (or any scrypt implementation that matches the same parameters).
+ * The plaintext ADMIN_BOOTSTRAP_PASSWORD is honoured only outside
+ * live production (dev walkthrough), so the bootstrap credential
+ * never lives in plaintext in the Render dashboard.
+ *
+ * If neither is set in dev/test, we fall back to the deterministic
+ * per-machine derivation so the walkthrough still works.
  */
-export function requireAdminBootstrapPassword(): string {
-  const v = process.env.ADMIN_BOOTSTRAP_PASSWORD;
-  if (v && v.length >= 10) return v;
+export function verifyAdminBootstrapPassword(candidate: string): boolean {
+  const hashEnv = process.env.ADMIN_BOOTSTRAP_PASSWORD_HASH;
+  if (hashEnv && hashEnv.startsWith("scrypt$")) {
+    return verifyScryptEncoded(candidate, hashEnv);
+  }
+
+  // Dev / test paths only.
   if (isLiveProduction()) {
     throw new Error(
-      "ADMIN_BOOTSTRAP_PASSWORD must be set to a strong value in production.",
+      "ADMIN_BOOTSTRAP_PASSWORD_HASH must be set (scrypt$... format) in production.",
     );
   }
-  return deriveDevFallback("ADMIN_BOOTSTRAP_PASSWORD");
+  const plaintext =
+    (process.env.ADMIN_BOOTSTRAP_PASSWORD && process.env.ADMIN_BOOTSTRAP_PASSWORD.length >= 10
+      ? process.env.ADMIN_BOOTSTRAP_PASSWORD
+      : undefined) ?? deriveDevFallback("ADMIN_BOOTSTRAP_PASSWORD");
+  return timingSafeEqualString(candidate, plaintext);
+}
+
+/** scrypt$<Nlog2>$<saltB64>$<keyB64> — a small, dependency-free format. */
+function verifyScryptEncoded(candidate: string, encoded: string): boolean {
+  try {
+    const parts = encoded.split("$");
+    if (parts.length !== 4 || parts[0] !== "scrypt") return false;
+    const nLog2 = Number(parts[1]);
+    if (!Number.isInteger(nLog2) || nLog2 < 14 || nLog2 > 20) return false;
+    const salt = Buffer.from(parts[2]!, "base64");
+    const key = Buffer.from(parts[3]!, "base64");
+    const N = 1 << nLog2;
+    const derived = scryptSync(candidate, salt, key.length, { N, r: 8, p: 1 });
+    return derived.length === key.length && timingSafeEqual(derived, key);
+  } catch {
+    return false;
+  }
+}
+
+function timingSafeEqualString(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  return timingSafeEqual(ab, bb);
+}
+
+/**
+ * Convenience for offline bootstrap: generate an scrypt-encoded hash
+ * string to paste into ADMIN_BOOTSTRAP_PASSWORD_HASH. Kept here so a
+ * one-liner works in a dev REPL without extra files:
+ *   node -e "import('./src/lib/secrets').then(m => console.log(m.hashAdminPassword('my-new-password')))"
+ */
+export function hashAdminPassword(plaintext: string, nLog2 = 15): string {
+  const salt = randomBytes(16);
+  const N = 1 << nLog2;
+  const key = scryptSync(plaintext, salt, 32, { N, r: 8, p: 1 });
+  return `scrypt$${nLog2}$${salt.toString("base64")}$${key.toString("base64")}`;
 }
 
 /**
