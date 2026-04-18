@@ -10,9 +10,25 @@
 import "server-only";
 import { cookies } from "next/headers";
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { z } from "zod";
 import type { AuthSession } from "@/types/domain";
 import { appConfig } from "@/config/app";
 import { requireSecret } from "@/lib/secrets";
+
+/**
+ * Runtime schema for the decoded session payload. Even though the
+ * HMAC guarantees server origin, validating against an explicit
+ * schema stops legacy / malformed payloads (e.g. older deploys
+ * without new fields) from being silently accepted. Additive schema
+ * changes should go through this type.
+ */
+const authSessionSchema = z.object({
+  enrolleeId: z.string().min(1).max(40),
+  authedAt: z.string().datetime(),
+  lastSeenAt: z.string().datetime().optional(),
+  channel: z.enum(["DOB", "PRINCIPAL_NIN", "OTP"]),
+  mocked: z.boolean().optional(),
+});
 
 const COOKIE_NAME = "lwh_session";
 
@@ -38,9 +54,10 @@ function decode(raw: string): AuthSession | null {
     return null;
   }
   try {
-    const s = JSON.parse(
-      Buffer.from(payload, "base64url").toString("utf8"),
-    ) as AuthSession;
+    const json = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    const parsed = authSessionSchema.safeParse(json);
+    if (!parsed.success) return null;
+    const s: AuthSession = parsed.data;
     const now = Date.now();
     const issued = new Date(s.authedAt).getTime();
     // Back-compat: existing in-flight sessions minted before F-06 may

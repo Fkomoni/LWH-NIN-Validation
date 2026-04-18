@@ -1,7 +1,15 @@
 import "server-only";
 import { cookies } from "next/headers";
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { z } from "zod";
 import { adminAllowList, requireSecret, verifyAdminBootstrapPassword } from "@/lib/secrets";
+
+const adminSessionSchema = z.object({
+  id: z.string().min(1).max(120),
+  email: z.string().email().max(200),
+  role: z.enum(["READ_ONLY", "OPS", "ADMIN"]),
+  at: z.string().datetime(),
+});
 
 /**
  * Dev-only admin session. Phase 2 replaces with NextAuth v5 + Leadway
@@ -56,7 +64,9 @@ export async function getAdminSession(): Promise<AdminSession | null> {
     return null;
   }
   try {
-    return JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as AdminSession;
+    const json = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    const parsed = adminSessionSchema.safeParse(json);
+    return parsed.success ? parsed.data : null;
   } catch {
     return null;
   }
