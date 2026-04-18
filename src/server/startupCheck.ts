@@ -82,6 +82,17 @@ export function runStartupCheck(): void {
     );
   }
 
+  // Deployment hygiene: if we rely on x-forwarded-for for rate-limit
+  // keys, log a prominent warning so the operator knows the reverse
+  // proxy must strip attacker-supplied tail hops before appending its
+  // own. Rate limits without this invariant are bypassable.
+  if (process.env.TRUST_XFF_LAST_HOP === "true") {
+    log.warn(
+      {},
+      "startup.xff.trusted: TRUST_XFF_LAST_HOP=true — the reverse proxy MUST strip attacker-supplied X-Forwarded-For values",
+    );
+  }
+
   // PROGNOSIS_API_KEY / _HEADER are optional — the bearer token
   // from /ApiUsers/Login is the primary auth and is sent on the
   // Authorization header automatically. Only set these if Leadway

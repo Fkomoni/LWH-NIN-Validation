@@ -19,19 +19,27 @@ const PROTECTED_ADMIN = /^\/admin\/(?!login)(.*)/;
 
 /**
  * Pick the trusted client IP per F-07.
+ *
  * Order of preference:
- *   1. `x-real-ip` — Render/Azure/CloudFront-style single-source-of-truth
- *   2. Last hop of `x-forwarded-for` — the hop nearest to our infra;
- *      the attacker-controllable hops are at the *start* of the list.
- *   3. "0.0.0.0" if neither is present (shouldn't happen in prod).
+ *   1. `x-real-ip`  — Render/Azure/CloudFront-style single-source-of-truth.
+ *                     Always preferred when present.
+ *   2. Last hop of `x-forwarded-for` — ONLY consulted when the deploy
+ *      opts in via `TRUST_XFF_LAST_HOP=true`. Requires a proxy that
+ *      appends a trusted last hop and strips attacker-supplied tail
+ *      values. Without that invariant, an attacker can append their
+ *      desired IP to XFF and bypass per-IP rate limits.
+ *   3. "0.0.0.0" otherwise — the rate-limiter coalesces all such
+ *      requests onto a single key, which is the safe default.
  */
 function trustedClientIp(req: NextRequest): string {
   const realIp = req.headers.get("x-real-ip")?.trim();
   if (realIp) return realIp;
-  const xff = req.headers.get("x-forwarded-for");
-  if (xff) {
-    const parts = xff.split(",").map((s) => s.trim()).filter(Boolean);
-    if (parts.length) return parts[parts.length - 1]!;
+  if (process.env.TRUST_XFF_LAST_HOP === "true") {
+    const xff = req.headers.get("x-forwarded-for");
+    if (xff) {
+      const parts = xff.split(",").map((s) => s.trim()).filter(Boolean);
+      if (parts.length) return parts[parts.length - 1]!;
+    }
   }
   return "0.0.0.0";
 }
