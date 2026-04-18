@@ -52,8 +52,12 @@ export interface AuthSession {
   enrolleeId: string;
   /** Wall-clock when the session was first issued (bounds absoluteMs). */
   authedAt: string;
-  /** Wall-clock of the last authenticated request (bounds idleMs). */
-  lastSeenAt: string;
+  /**
+   * Wall-clock of the last authenticated request (bounds idleMs).
+   * Optional because legacy in-flight sessions minted before F-06 may
+   * not carry it; decode() treats a missing value as "just seen".
+   */
+  lastSeenAt?: string;
   channel: "DOB" | "PRINCIPAL_NIN" | "OTP";
   mocked?: boolean;
 }
