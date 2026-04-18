@@ -7,7 +7,10 @@ import {
   clearAdminSession,
   findDevAdmin,
   getAdminSession,
+  roleAtLeast,
   setAdminSession,
+  type AdminRole,
+  type AdminSession,
 } from "@/server/admin/session";
 import { resolveReview } from "@/server/admin/reviews";
 import { adminResetMember, adminUnlock } from "@/server/lockout";
@@ -86,16 +89,31 @@ export async function adminLogout() {
   redirect("/admin");
 }
 
-/** Helper: every admin mutation fetches its own session. */
-async function requireAdmin() {
+/**
+ * Require an admin session AND enforce a minimum role. READ_ONLY can
+ * view the console but cannot perform any mutation. OPS can resolve
+ * reviews, unlock enrollees and drain the outbox. ADMIN additionally
+ * can wipe member state (OTP + rate-limit + lockout).
+ */
+async function requireAdminRole(minRole: AdminRole): Promise<AdminSession> {
   const admin = await getAdminSession();
   if (!admin) throw new Error("UNAUTHENTICATED");
+  if (!roleAtLeast(admin.role, minRole)) {
+    await audit({
+      action: "admin.forbidden",
+      actorType: "admin",
+      actorId: admin.id,
+      traceId: traceId(),
+      payload: { have: admin.role, need: minRole },
+    });
+    throw new Error("FORBIDDEN");
+  }
   return admin;
 }
 
 /**
  * F-01 / F-03: resolve a manual review row.
- *   - Session check is mandatory.
+ *   - Session check is mandatory; role must be at least OPS.
  *   - The actor id comes from the signed cookie, NOT from form data.
  *   - An invalid request simply returns idle (don't leak state).
  */
@@ -103,7 +121,7 @@ export async function resolveReviewAction(
   _prev: { status: "idle" | "done" },
   formData: FormData,
 ): Promise<{ status: "idle" | "done" }> {
-  const admin = await requireAdmin();
+  const admin = await requireAdminRole("OPS");
   const id = String(formData.get("id") ?? "");
   const action = String(formData.get("action") ?? "") as "APPROVED" | "REJECTED";
   if (!id || (action !== "APPROVED" && action !== "REJECTED"))
@@ -119,20 +137,20 @@ export async function resolveReviewAction(
   return { status: "done" };
 }
 
-/** F-01: session-gated manual unlock. */
+/** F-01: session-gated manual unlock. Requires at least OPS. */
 export async function unlockEnrolleeAction(formData: FormData): Promise<void> {
-  const admin = await requireAdmin();
+  const admin = await requireAdminRole("OPS");
   const parsed = enrolleeIdSchema.safeParse(formData.get("enrolleeId"));
   if (!parsed.success) return;
   await adminUnlock(parsed.data, admin.id);
 }
 
-/** F-01: session-gated outbox drain. */
+/** F-01: session-gated outbox drain. Requires at least OPS. */
 export async function drainOutboxAction(): Promise<{
   processed: number;
   remaining: number;
 }> {
-  await requireAdmin();
+  await requireAdminRole("OPS");
   return drainPrognosisOutbox();
 }
 
@@ -143,14 +161,22 @@ export type ResetMemberState =
 
 /**
  * Clear lockout, rate limits, and OTP state for a single enrolleeId.
- * (Already session-gated pre-F-01; kept for completeness.)
+ * Destructive — requires ADMIN.
  */
 export async function resetMemberAction(
   _prev: ResetMemberState,
   formData: FormData,
 ): Promise<ResetMemberState> {
-  const admin = await getAdminSession();
-  if (!admin) return { status: "error", message: "Not signed in." };
+  let admin: AdminSession;
+  try {
+    admin = await requireAdminRole("ADMIN");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg === "UNAUTHENTICATED") {
+      return { status: "error", message: "Not signed in." };
+    }
+    return { status: "error", message: "You don't have permission to do that." };
+  }
 
   const parsed = enrolleeIdSchema.safeParse(formData.get("enrolleeId"));
   if (!parsed.success) {

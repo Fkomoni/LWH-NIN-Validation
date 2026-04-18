@@ -16,10 +16,29 @@ function sign(p: string): string {
     .digest("base64url");
 }
 
+export type AdminRole = "READ_ONLY" | "OPS" | "ADMIN";
+
+/**
+ * Role hierarchy (monotonic — a higher role can perform every action
+ * permitted to a lower role). Used by requireAdminRole().
+ *   READ_ONLY  (0) — can view the ops console
+ *   OPS        (1) — approve/reject reviews, unlock enrollees, drain outbox
+ *   ADMIN      (2) — wipe member state, everything OPS can do
+ */
+const ROLE_RANK: Record<AdminRole, number> = {
+  READ_ONLY: 0,
+  OPS: 1,
+  ADMIN: 2,
+};
+
+export function roleAtLeast(have: AdminRole, need: AdminRole): boolean {
+  return ROLE_RANK[have] >= ROLE_RANK[need];
+}
+
 export interface AdminSession {
   id: string;
   email: string;
-  role: "READ_ONLY" | "OPS" | "ADMIN";
+  role: AdminRole;
   at: string;
 }
 
