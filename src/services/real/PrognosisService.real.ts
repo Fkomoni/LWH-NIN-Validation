@@ -149,10 +149,18 @@ export const realPrognosisService: PrognosisService = {
         }
       }
 
+      // Prognosis returns phone numbers with formatting ("+234 801 …",
+      // "0701-234-5678", etc.) but its UpdateMemberData validator
+      // rejects anything that isn't digits-only ("Phone number must
+      // contain only digits."). Normalise to digits before sending.
+      // We also keep a single leading country-code 234 when the raw
+      // started with + so the number is still meaningful.
+      const phoneDigits = phone.replace(/\D/g, "");
+
       const body = {
         Gender: bio.gender ?? "",
         NIN: payload.nin,
-        PHoneNumber: phone,
+        PHoneNumber: phoneDigits,
         Enrolleeid: payload.memberId,
         DOB: dobNum,
       };
