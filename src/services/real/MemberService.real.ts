@@ -65,12 +65,34 @@ async function loadHouseholdRaw(enrolleeId: string): Promise<HouseholdResult> {
     return { kind: "provider-error" };
   }
   if (!principal) return { kind: "not-found" };
-  const deps = await getEnrolleeDependants(enrolleeId);
+
+  // Pull the dependant *list* first — it gives us their enrolleeIds.
+  // Then fetch each one's full bio in parallel, because the list
+  // endpoint only carries summary fields and in particular does NOT
+  // include the per-member `NIN` field. Without this deep fetch the
+  // /done summary and /household render would mis-report every
+  // dependant as "not submitted" even after a successful update.
+  const depsSummary = await getEnrolleeDependants(enrolleeId);
+  const depBios = await Promise.all(
+    depsSummary.map(async (d) => {
+      try {
+        const bio = await getEnrolleeBioData(d.enrolleeId);
+        return bio ?? d; // fall back to the list entry on 404 / missing
+      } catch (err) {
+        log.warn(
+          { err: String(err), depId: d.enrolleeId },
+          "member.dep-bio.fail-softfallback",
+        );
+        return d;
+      }
+    }),
+  );
+
   return {
     kind: "ok",
     household: {
       principal: toPerson(principal, true),
-      dependants: deps.map((d) => toPerson(d, false)),
+      dependants: depBios.map((d) => toPerson(d, false)),
     },
   };
 }
