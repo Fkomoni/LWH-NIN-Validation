@@ -86,8 +86,13 @@ export const appConfig = {
   /**
    * When true, services/* resolve to mock implementations and MSW is
    * installed in the browser (Phase 1).
+   *
+   * Fail-closed default: an unset/misspelled env var evaluates to
+   * `false` (live services, no fixtures). To run mocks locally, set
+   * NEXT_PUBLIC_MOCKS_ENABLED=true explicitly. startupCheck refuses
+   * to boot when this resolves to true in NODE_ENV=production.
    */
-  mocksEnabled: process.env.NEXT_PUBLIC_MOCKS_ENABLED !== "false",
+  mocksEnabled: process.env.NEXT_PUBLIC_MOCKS_ENABLED === "true",
 } as const;
 
 export type AppConfig = typeof appConfig;
