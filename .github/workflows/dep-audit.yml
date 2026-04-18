@@ -1,0 +1,80 @@
+name: Scheduled dependency audit
+
+# Runs independently of the per-PR `pnpm audit` in ci.yml so that a
+# CVE disclosed between PRs (e.g. a Next.js or Prisma advisory
+# published on a Friday) is surfaced quickly instead of waiting for
+# the next merge. A failed run creates a GitHub issue via the
+# `create-issue` step.
+on:
+  schedule:
+    # Every Monday 07:00 UTC (08:00 Africa/Lagos).
+    - cron: "0 7 * * 1"
+  workflow_dispatch: {}
+
+concurrency:
+  group: dep-audit-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Audit (fail on high / critical)
+        id: audit
+        run: pnpm audit --audit-level high --prod
+
+      - name: Open or update tracking issue on failure
+        if: failure() && github.event_name == 'schedule'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = "Dependency audit found high/critical advisories";
+            const body = [
+              "The weekly scheduled `pnpm audit --audit-level high --prod` run failed.",
+              "",
+              `Workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              "",
+              "Triage:",
+              "1. Review the failing advisories in the run log.",
+              "2. Bump / replace the vulnerable package.",
+              "3. Close this issue once the next audit run is green.",
+            ].join("\n");
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              labels: "security,dependencies",
+            });
+            const existing = issues.find(i => i.title === title);
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ["security", "dependencies"],
+              });
+            }
