@@ -146,10 +146,36 @@ export function HouseholdTable({ household }: { household: Household }) {
       r.status === "FAILED",
   );
 
+  // Every row is in a terminal state → the user has nothing to do on
+  // this page. Usually because their NIN (and every dependant's NIN)
+  // is already on file. Surface this loudly — otherwise the page just
+  // shows "NIN on file" blocks and the user wonders what they should
+  // be doing.
+  const nothingToDo = people.length > 0 && people.every((p) => isTerminal(rows[p.id]?.status ?? p.ninStatus));
+
   return (
     <div className="space-y-4">
+      {nothingToDo ? (
+        <div
+          role="status"
+          className="rounded-md border border-success/40 bg-success/10 p-4 text-sm"
+        >
+          <p className="font-semibold text-success">
+            You&apos;re all set — every NIN on your plan is already on file.
+          </p>
+          <p className="mt-1 text-foreground">
+            There&apos;s nothing for you to update here. You can click{" "}
+            <span className="font-medium">Finish</span> to close out, or come
+            back later if you need to check a beneficiary&apos;s record.
+          </p>
+        </div>
+      ) : null}
+
       {globalError ? (
-        <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">
+        <p
+          role="alert"
+          className="rounded-md border-2 border-destructive bg-destructive/10 p-3 text-sm font-medium text-destructive"
+        >
           {globalError}
         </p>
       ) : null}
