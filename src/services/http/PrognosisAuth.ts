@@ -17,9 +17,19 @@ interface Token {
 }
 
 let cached: Token | null = null;
-// Leadway Prognosis tokens are valid for 6 hours. Refresh at 5h to
-// leave headroom for long-running requests.
-const TOKEN_TTL_MS = 5 * 60 * 60 * 1000;
+// Leadway Prognosis tokens are valid for 6 hours, but we deliberately
+// refresh MUCH more often so a heap-scraped token has a small usable
+// window. 1 hour strikes a balance: the Prognosis /ApiUsers/Login
+// cost (one round-trip) is amortised across ~3600 downstream calls,
+// while a stolen token is burned in at most 60 minutes. Refresh is
+// additionally forced on any 401/403 from a downstream call (see
+// QoreIdClient-style invalidation pattern).
+const TOKEN_TTL_MS = 60 * 60 * 1000;
+
+/** Exported for ops tooling: wipe the cache on a security event. */
+export function invalidatePrognosisToken(): void {
+  cached = null;
+}
 
 function readToken(body: unknown): string | undefined {
   if (!body || typeof body !== "object") return undefined;
