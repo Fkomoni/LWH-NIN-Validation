@@ -1,6 +1,7 @@
 import "server-only";
 import { log } from "@/lib/logger";
 import { appConfig } from "@/config/app";
+import { validateProviderUrl } from "@/lib/urlAllowList";
 
 /**
  * Startup config sanity check.
@@ -91,6 +92,29 @@ export function runStartupCheck(): void {
       {},
       "startup.xff.trusted: TRUST_XFF_LAST_HOP=true — the reverse proxy MUST strip attacker-supplied X-Forwarded-For values",
     );
+  }
+
+  // Provider URL allow-list. Each outbound URL is validated against
+  // a known-good hostname suffix so a compromised Render dashboard
+  // or a mistyped value cannot redirect PII to an attacker host.
+  // Non-fatal at startup: we warn and let the relevant flows fail
+  // at call time rather than refusing to boot the whole app over a
+  // single typo'd base URL.
+  const providers: Array<[string, string, string[]]> = [
+    ["PROGNOSIS_BASE_URL", process.env.PROGNOSIS_BASE_URL ?? "", ["leadwayhealth.com"]],
+    ["QORE_TOKEN_URL", process.env.QORE_TOKEN_URL ?? "", ["qoreid.com", "qoreid.app"]],
+    ["QORE_NIN_VERIFY_URL", process.env.QORE_NIN_VERIFY_URL ?? "", ["qoreid.com", "qoreid.app"]],
+  ];
+  for (const [name, value, hosts] of providers) {
+    if (!value) continue;
+    try {
+      validateProviderUrl(value, { allowedHostSuffixes: hosts, label: name });
+    } catch (err) {
+      log.warn(
+        { err: err instanceof Error ? err.message : String(err), env: name },
+        "startup.provider-url.rejected",
+      );
+    }
   }
 
   // PROGNOSIS_API_KEY / _HEADER are optional — the bearer token
