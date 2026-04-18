@@ -200,11 +200,23 @@ export const realPrognosisService: PrognosisService = {
 
       let keyHeaderName: string | null = null;
       if (wantsSecondary) {
+        const apiKey = process.env.PROGNOSIS_API_KEY;
+        if (!apiKey) {
+          // PROGNOSIS_API_KEY_HEADER was configured but the paired
+          // secret is absent. Do NOT fall back to the bearer JWT —
+          // that would duplicate the login token onto a separate
+          // header (likely logged/traced differently) and could leak
+          // the bearer into unrelated audit pipelines.
+          log.error(
+            { txnRef: payload.txnRef, header: envHeader },
+            "prognosis.update.api-key-header-without-value",
+          );
+          return { ok: false, reason: "PROVIDER_ERROR", retryable: false };
+        }
         keyHeaderName = envHeader!;
         const secondaryBearer =
           (process.env.PROGNOSIS_API_KEY_BEARER ?? "true") !== "false";
-        const rawValue = process.env.PROGNOSIS_API_KEY ?? token;
-        headers.set(keyHeaderName, secondaryBearer ? `Bearer ${rawValue}` : rawValue);
+        headers.set(keyHeaderName, secondaryBearer ? `Bearer ${apiKey}` : apiKey);
       }
 
       log.info(
