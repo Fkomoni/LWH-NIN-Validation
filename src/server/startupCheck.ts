@@ -97,23 +97,27 @@ export function runStartupCheck(): void {
   // Provider URL allow-list. Each outbound URL is validated against
   // a known-good hostname suffix so a compromised Render dashboard
   // or a mistyped value cannot redirect PII to an attacker host.
-  // Non-fatal at startup: we warn and let the relevant flows fail
-  // at call time rather than refusing to boot the whole app over a
-  // single typo'd base URL.
+  //
+  // In NODE_ENV=production a rejection is FATAL: a noisy boot
+  // failure is preferable to silent exfiltration via a bad env var.
+  // In dev/test we warn and continue so a single typo doesn't block
+  // local iteration.
   const providers: Array<[string, string, string[]]> = [
     ["PROGNOSIS_BASE_URL", process.env.PROGNOSIS_BASE_URL ?? "", ["leadwayhealth.com"]],
     ["QORE_TOKEN_URL", process.env.QORE_TOKEN_URL ?? "", ["qoreid.com", "qoreid.app"]],
     ["QORE_NIN_VERIFY_URL", process.env.QORE_NIN_VERIFY_URL ?? "", ["qoreid.com", "qoreid.app"]],
   ];
+  const prodMode = process.env.NODE_ENV === "production";
   for (const [name, value, hosts] of providers) {
     if (!value) continue;
     try {
       validateProviderUrl(value, { allowedHostSuffixes: hosts, label: name });
     } catch (err) {
-      log.warn(
-        { err: err instanceof Error ? err.message : String(err), env: name },
-        "startup.provider-url.rejected",
-      );
+      const msg = err instanceof Error ? err.message : String(err);
+      if (prodMode) {
+        throw new Error(`startup.fatal: ${msg}`);
+      }
+      log.warn({ err: msg, env: name }, "startup.provider-url.rejected");
     }
   }
 
