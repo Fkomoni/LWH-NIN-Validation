@@ -149,7 +149,7 @@ export const realNinService: NinService = {
     return result;
   },
 
-  async verifyForAuth({ nin, providedDob, expectedFullName, traceId: tid }) {
+  async verifyForAuth({ nin, providedDob, expectedFullName, expectedDob, traceId: tid }) {
     if (!isValidNinFormat(nin)) {
       return { match: false, message: "NIN must be exactly 11 digits." };
     }
@@ -172,15 +172,19 @@ export const realNinService: NinService = {
       };
     }
 
-    const dobMatched = resp.dob ? dobMatches(providedDob, resp.dob) : false;
+    // Identity proof for the fallback path = NIMC's DOB must match
+    // the DOB Prognosis already has on file for this enrollee. The
+    // user's typed DOB is logged for audit but is not the match axis.
+    const dobMatched = resp.dob && expectedDob ? dobMatches(expectedDob, resp.dob) : false;
     const { score } = scoreNameMatch(expectedFullName, resp.fullName ?? "");
-    const nameOk = score >= 0.4; // loose identity sanity-check (below manual-review floor)
+    const nameOk = score >= 0.4;
 
     log.info(
       {
         expectedName: maskName(expectedFullName),
         qoreName: resp.fullName ? maskName(resp.fullName) : null,
         providedDate: providedDob,
+        prognosisDate: expectedDob || null,
         qoreDate: resp.dob ?? null,
         nameScore: score,
         dobMatched,
@@ -197,7 +201,7 @@ export const realNinService: NinService = {
         verifiedFullName: resp.fullName,
         dobFromNin: resp.dob,
         message:
-          "The date of birth you entered doesn't match the one on your NIN. Please check and try again, or contact Leadway Support.",
+          "The date of birth on this NIN doesn't match the one we have on file. Please double-check the NIN and try again, or contact Leadway Support.",
       };
     }
     if (!nameOk) {

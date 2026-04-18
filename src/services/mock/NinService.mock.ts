@@ -140,7 +140,7 @@ export const mockNinService: NinService = {
     return result;
   },
 
-  async verifyForAuth({ nin, providedDob, expectedFullName }) {
+  async verifyForAuth({ nin, providedDob, expectedFullName, expectedDob }) {
     if (!isValidNinFormat(nin)) {
       return { match: false, message: "NIN must be exactly 11 digits." };
     }
@@ -158,7 +158,10 @@ export const mockNinService: NinService = {
         message: "NIMC is temporarily unavailable. Please try again in a moment.",
       };
     }
-    const dobMatched = fixture.dob ? dobMatches(providedDob, fixture.dob) : false;
+    // NIMC's DOB must agree with Prognosis's stored DOB. The user's
+    // providedDob is audit-only in this path.
+    void providedDob;
+    const dobMatched = fixture.dob && expectedDob ? dobMatches(expectedDob, fixture.dob) : false;
     const { score } = scoreNameMatch(expectedFullName, fixture.fullName ?? "");
     if (!dobMatched) {
       return {
@@ -168,7 +171,7 @@ export const mockNinService: NinService = {
         verifiedFullName: fixture.fullName,
         dobFromNin: fixture.dob,
         message:
-          "The date of birth you entered doesn't match the one on your NIN. Please check and try again.",
+          "The date of birth on this NIN doesn't match the one we have on file. Please double-check the NIN and try again.",
       };
     }
     return {

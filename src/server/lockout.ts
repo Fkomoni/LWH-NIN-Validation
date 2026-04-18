@@ -104,6 +104,17 @@ export async function clearFailures(enrolleeId: string): Promise<void> {
   await kv.del(failKey(enrolleeId));
 }
 
+/**
+ * Wipe both the hard lock and the failure counter for an enrollee.
+ * Called by the NIN-fallback path when a member proves their identity
+ * by matching NIMC's DOB against Prognosis's DOB.
+ */
+export async function clearLockout(enrolleeId: string): Promise<void> {
+  const kv = getKv();
+  await kv.del(hardKey(enrolleeId));
+  await kv.del(failKey(enrolleeId));
+}
+
 export async function adminUnlock(enrolleeId: string, adminId: string): Promise<void> {
   const kv = getKv();
   await kv.del(hardKey(enrolleeId));

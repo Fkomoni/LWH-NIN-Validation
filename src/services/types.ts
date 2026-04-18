@@ -60,15 +60,22 @@ export interface NinService {
   /**
    * Verify a principal's NIN for the auth-via-NIN fallback.
    *
-   * Compares NIMC's DOB against the DOB the user typed into the form
-   * (NOT against Prognosis's record — the whole point of this flow is
-   * cases where Prognosis's DOB is wrong). Name is cross-checked
-   * against the Prognosis principal's full name for identity.
+   * Identity proof: NIMC's returned DOB must agree with Prognosis's
+   * stored DOB for the enrollee (`expectedDob`). Ownership of a NIN
+   * whose NIMC record matches the stored record is accepted as
+   * identity — this lets a member who has locked themselves out (e.g.
+   * by mis-typing their own DOB three times) recover cleanly.
+   *
+   * `providedDob` (what the user typed in the fallback form) is
+   * recorded for audit but is NOT the match axis. Name is
+   * cross-checked against the Prognosis principal's full name for
+   * additional identity sanity (≥ 0.4 token-sort JW).
    */
   verifyForAuth(input: {
     nin: string;
     providedDob: string;
     expectedFullName: string;
+    expectedDob: string;
     traceId: string;
   }): Promise<{
     match: boolean;

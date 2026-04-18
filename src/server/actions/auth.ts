@@ -10,7 +10,7 @@ import { setSession } from "@/server/session";
 import { audit } from "@/server/audit";
 import { traceId, txnRef } from "@/lib/ids";
 import { rateLimit } from "@/server/rateLimit";
-import { isLocked, recordFail, clearFailures, getLockExpiry } from "@/server/lockout";
+import { isLocked, recordFail, clearFailures, clearLockout, getLockExpiry } from "@/server/lockout";
 import { notifyLockout } from "@/server/notify";
 import { enqueuePrognosis } from "@/server/outbox";
 import { notifyNinValidated } from "@/server/notify";
@@ -179,15 +179,15 @@ export async function authByPrincipalNin(
   const ipLimit = await rateLimit.authIp(ip);
   if (!ipLimit.ok) return { status: "rate-limited" };
 
-  if (await isLocked(parsed.data.enrolleeId)) {
-    const expiresAt = (await getLockExpiry(parsed.data.enrolleeId)) ?? Date.now();
-    return { status: "locked", expiresAt };
-  }
+  // Intentionally NO isLocked() pre-check here. This path is the
+  // recovery route: a member who has locked themselves out by
+  // mistyping their DOB can still prove identity by submitting a NIN
+  // whose NIMC record agrees with our Prognosis record. Success
+  // clears the lock (see clearLockout below).
 
   const svc = getServices();
 
-  // 1. Load the principal's bio so we know the expected name for
-  //    the NIMC name-match sanity check.
+  // 1. Load the principal's bio for name + Prognosis DOB.
   let household;
   try {
     household = await svc.member.loadHousehold(parsed.data.enrolleeId);
@@ -199,11 +199,12 @@ export async function authByPrincipalNin(
   }
   const principal = household.principal;
 
-  // 2+3. Verify the NIN with NIMC against the user's own DOB.
+  // 2. Verify the NIN. Identity proof = NIMC DOB == Prognosis DOB.
   const verify = await svc.nin.verifyForAuth({
     nin: parsed.data.nin,
     providedDob: parsed.data.dob,
     expectedFullName: principal.fullName,
+    expectedDob: principal.dob,
     traceId: tid,
   });
 
@@ -236,7 +237,10 @@ export async function authByPrincipalNin(
     return { status: "fail", message: verify.message };
   }
 
-  await clearFailures(parsed.data.enrolleeId);
+  // Successful NIN+Prognosis-DOB match proves identity; wipe any
+  // active hard lock and failure history so a locked-out member is
+  // unstuck by the fallback path.
+  await clearLockout(parsed.data.enrolleeId);
   {
     const now = new Date().toISOString();
     await setSession({
