@@ -82,7 +82,11 @@ export async function getSession(): Promise<AuthSession | null> {
 function cookieOptions() {
   return {
     httpOnly: true as const,
-    secure: process.env.NODE_ENV === "production",
+    // secure is intentionally unconditional. A dev on http://localhost
+    // that also sets NODE_ENV=production would otherwise get a cookie
+    // over plain HTTP. HSTS is preloaded anyway so modern browsers
+    // always upgrade the scheme.
+    secure: true as const,
     // F-12: strict — no legitimate cross-site entry point into the
     // portal needs the session cookie to ride on top-level navigations.
     sameSite: "strict" as const,

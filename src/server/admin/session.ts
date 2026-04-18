@@ -77,7 +77,9 @@ export async function setAdminSession(s: AdminSession): Promise<void> {
   const payload = Buffer.from(JSON.stringify(s), "utf8").toString("base64url");
   store.set(COOKIE, `${payload}.${sign(payload)}`, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    // secure is intentionally unconditional — see src/server/session.ts
+    // for the rationale. HSTS is preloaded.
+    secure: true,
     // F-11: strict — there is no legitimate cross-site entry point
     // into /admin/*, so refuse the cookie on top-level navigations
     // initiated from other origins.
