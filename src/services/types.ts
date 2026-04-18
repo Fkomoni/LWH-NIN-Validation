@@ -1,4 +1,4 @@
-import type { AuthSession, Household, NinValidationResult } from "@/types/domain";
+import type { Household, NinValidationResult } from "@/types/domain";
 
 /* ─── MemberService ───────────────────────────────────────────────────── */
 
@@ -126,9 +126,4 @@ export interface ServiceContainer {
   otp: OtpService;
   prognosis: PrognosisService;
   notification: NotificationService;
-  session: {
-    currentAuth(): Promise<AuthSession | null>;
-    set(session: AuthSession): Promise<void>;
-    clear(): Promise<void>;
-  };
 }

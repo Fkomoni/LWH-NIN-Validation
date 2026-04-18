@@ -3,10 +3,16 @@ import "server-only";
  * Service resolver. One flag (`NEXT_PUBLIC_MOCKS_ENABLED`) toggles the
  * entire service container between Phase-1 mocks and the production
  * HTTP clients. No feature code branches on it.
+ *
+ * Session state is deliberately NOT on the container: the per-request
+ * session lives in a signed HttpOnly cookie and is read via
+ * `getSession()` / `requireSession()` in src/server/session.ts. A
+ * module-level session object here would be shared across every
+ * concurrent request in the process and would leak one user's identity
+ * into another user's request.
  */
 import { appConfig } from "@/config/app";
 import type { ServiceContainer } from "./types";
-import type { AuthSession } from "@/types/domain";
 
 import { mockMemberService } from "./mock/MemberService.mock";
 import { mockNinService } from "./mock/NinService.mock";
@@ -20,23 +26,6 @@ import { realOtpService } from "./real/OtpService.real";
 import { realPrognosisService } from "./real/PrognosisService.real";
 import { realNotificationService } from "./real/NotificationService.real";
 
-/**
- * Phase-1 session store — per-process only. Phase 2 replaces this with
- * NextAuth v5 backed by the signed cookie or a database session.
- */
-let currentSession: AuthSession | null = null;
-const sessionStore = {
-  async currentAuth() {
-    return currentSession;
-  },
-  async set(s: AuthSession) {
-    currentSession = s;
-  },
-  async clear() {
-    currentSession = null;
-  },
-};
-
 let cached: ServiceContainer | null = null;
 
 export function getServices(): ServiceContainer {
@@ -48,7 +37,6 @@ export function getServices(): ServiceContainer {
         otp: mockOtpService,
         prognosis: mockPrognosisService,
         notification: mockNotificationService,
-        session: sessionStore,
       }
     : {
         member: realMemberService,
@@ -56,7 +44,6 @@ export function getServices(): ServiceContainer {
         otp: realOtpService,
         prognosis: realPrognosisService,
         notification: realNotificationService,
-        session: sessionStore,
       };
   return cached;
 }
