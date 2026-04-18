@@ -241,3 +241,31 @@ model AuditEvent {
   @@index([memberId, at])
   @@index([action, at])
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// Postgres-backed KV (fallback when Upstash is not provisioned).
+// Backs the Kv interface in src/server/kv/types.ts so rate-limit /
+// lockout / OTP / outbox state survives restarts.
+// ────────────────────────────────────────────────────────────────────────────
+
+model KvEntry {
+  key       String    @id
+  value     Json
+  expiresAt DateTime?
+  updatedAt DateTime  @updatedAt
+
+  @@index([expiresAt])
+}
+
+// Sliding-window counter rows. One row per (key, timestamp) sample;
+// pushWindow() inserts, deletes rows older than the window cutoff,
+// and returns the remaining count. Size is bounded by the rate-limit
+// thresholds in appConfig.rateLimits.
+model KvWindowSample {
+  key       String
+  sampledAt DateTime @default(now())
+  nonce     String // allows duplicate timestamps
+
+  @@id([key, sampledAt, nonce])
+  @@index([key, sampledAt])
+}

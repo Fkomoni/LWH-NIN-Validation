@@ -14,7 +14,11 @@ services:
     region: oregon
     branch: claude/nin-verification-system-iyLLh
     autoDeploy: true
-    buildCommand: pnpm install --frozen-lockfile && pnpm exec prisma generate && pnpm build
+    buildCommand: >-
+      pnpm install --frozen-lockfile &&
+      pnpm exec prisma generate &&
+      (if [ -n "$DATABASE_URL" ]; then pnpm exec prisma migrate deploy; fi) &&
+      pnpm build
     startCommand: pnpm start -p $PORT
     healthCheckPath: /api/healthz
     envVars:
