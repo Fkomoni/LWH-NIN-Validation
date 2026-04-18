@@ -19,6 +19,7 @@ import { audit } from "@/server/audit";
 import { traceId } from "@/lib/ids";
 import { rateLimit } from "@/server/rateLimit";
 import { enrolleeIdSchema } from "@/schemas/auth";
+import { verifyTurnstile } from "@/server/turnstile";
 
 async function clientIp(): Promise<string> {
   const h = await headers();
@@ -47,6 +48,23 @@ export async function adminLogin(
     return { status: "error", message: "Email and password are required." };
 
   const ip = await clientIp();
+
+  const turnstileToken =
+    (formData.get("cf-turnstile-response") as string | null) ??
+    (formData.get("turnstileToken") as string | null) ??
+    undefined;
+  const captcha = await verifyTurnstile(turnstileToken ?? undefined, ip);
+  if (!captcha.ok) {
+    await audit({
+      action: "admin.login.turnstile.fail",
+      actorType: "system",
+      traceId: traceId(),
+      ip,
+      payload: { reason: captcha.reason },
+    });
+    return { status: "error", message: "Please reload the page and try again." };
+  }
+
   const ipLimit = await rateLimit.adminLoginIp(ip);
   if (!ipLimit.ok) return { status: "rate-limited" };
   const emailLimit = await rateLimit.adminLoginEmail(email);

@@ -4,20 +4,29 @@ import { log } from "@/lib/logger";
 /**
  * Cloudflare Turnstile verification.
  *
- * Phase 1: noop — always allows. The Turnstile widget is not yet on the
- * form. Phase 2 drops the widget into <AuthStartForm /> and flips this
- * function to call the siteverify endpoint. The return shape does NOT
- * change between phases so callers can guard their paths today.
+ * Called from every authentication surface (portal auth, principal-NIN
+ * fallback, admin login) before any rate-limit or business-logic
+ * work. Fail-closed in live production when TURNSTILE_SECRET_KEY is
+ * unset. In dev / mock mode, a missing secret skips verification so
+ * the walkthrough still works.
+ *
+ * The widget (`cf-turnstile-response` form field) is wired in Phase 2
+ * of the UI — callers already propagate the token today so the gate
+ * is ready the moment the widget lands.
  */
 export interface TurnstileResult {
   ok: boolean;
-  reason?: "missing-token" | "invalid-token" | "provider-error";
+  reason?: "missing-token" | "invalid-token" | "provider-error" | "missing-secret";
 }
 
 export async function verifyTurnstile(token: string | undefined, ip: string): Promise<TurnstileResult> {
   const secret = process.env.TURNSTILE_SECRET_KEY;
   if (!secret) {
-    // Dev / Phase 1: allow through but warn so the gap is visible.
+    if (process.env.NODE_ENV === "production") {
+      log.error({ ip }, "turnstile.missing-secret");
+      return { ok: false, reason: "missing-secret" };
+    }
+    // Dev / test: allow through but surface the gap.
     log.debug({ ip }, "turnstile.skipped.no-secret");
     return { ok: true };
   }

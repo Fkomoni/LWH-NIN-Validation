@@ -15,6 +15,7 @@ import { notifyLockout } from "@/server/notify";
 import { enqueuePrognosis } from "@/server/outbox";
 import { notifyNinValidated } from "@/server/notify";
 import { appConfig } from "@/config/app";
+import { verifyTurnstile } from "@/server/turnstile";
 
 export type AuthStartState =
   | { status: "idle" }
@@ -52,6 +53,7 @@ export async function authStart(
     enrolleeId: formData.get("enrolleeId"),
     dob: formData.get("dob"),
     consent: formData.get("consent") === "on",
+    turnstileToken: formData.get("cf-turnstile-response") ?? formData.get("turnstileToken") ?? undefined,
   });
   if (!parsed.success) {
     return {
@@ -63,6 +65,21 @@ export async function authStart(
 
   const tid = traceId();
   const { ip, ua } = await ipAndUa();
+
+  const captcha = await verifyTurnstile(parsed.data.turnstileToken, ip);
+  if (!captcha.ok) {
+    await audit({
+      action: "auth.turnstile.fail",
+      actorType: "system",
+      traceId: tid,
+      ip,
+      payload: { reason: captcha.reason },
+    });
+    return {
+      status: "error",
+      message: "We couldn't verify you're human. Please reload the page and try again.",
+    };
+  }
 
   const ipLimit = await rateLimit.authIp(ip);
   if (!ipLimit.ok) {
@@ -167,6 +184,25 @@ export async function authByPrincipalNin(
 
   const tid = traceId();
   const { ip, ua } = await ipAndUa();
+
+  const turnstileToken =
+    (formData.get("cf-turnstile-response") as string | null) ??
+    (formData.get("turnstileToken") as string | null) ??
+    undefined;
+  const captcha = await verifyTurnstile(turnstileToken ?? undefined, ip);
+  if (!captcha.ok) {
+    await audit({
+      action: "auth.principalNin.turnstile.fail",
+      actorType: "system",
+      traceId: tid,
+      ip,
+      payload: { reason: captcha.reason },
+    });
+    return {
+      status: "error",
+      message: "We couldn't verify you're human. Please reload the page and try again.",
+    };
+  }
 
   const ipLimit = await rateLimit.authIp(ip);
   if (!ipLimit.ok) return { status: "rate-limited" };
