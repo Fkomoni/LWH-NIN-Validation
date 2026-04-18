@@ -70,7 +70,15 @@ export async function recordFail({
   const perTuple = await kv.pushWindow(failIpKey(enrolleeId, ip), windowMs);
 
   const threshold = appConfig.lockout.maxFailuresPerWindow;
-  const locked = perTuple >= threshold && perEnrollee >= threshold * 2;
+  // For OTP, skip the per-IP requirement — a 6-digit code is cheap to
+  // spray from a rotating-IP botnet. The per-enrollee counter is the
+  // only relevant gate for OTP: N bad codes = lock. Other channels
+  // (DOB, PRINCIPAL_NIN) retain the per-(enrollee,IP) AND per-enrollee
+  // gate so a malicious peer cannot remotely lock a stranger out.
+  const locked =
+    channel === "OTP"
+      ? perEnrollee >= threshold
+      : perTuple >= threshold && perEnrollee >= threshold * 2;
 
   if (locked) {
     await kv.set(
