@@ -65,3 +65,26 @@ export function requireAdminBootstrapPassword(): string {
   }
   return deriveDevFallback("ADMIN_BOOTSTRAP_PASSWORD");
 }
+
+/**
+ * Comma-separated allow-list of permitted admin email addresses.
+ * Throws in live production when unset/empty so the bootstrap login
+ * flow cannot accept an attacker-chosen email with the shared
+ * ADMIN_BOOTSTRAP_PASSWORD. In dev/mock mode, an empty list is
+ * permitted and means "any email" (preserves the walkthrough UX).
+ */
+export function adminAllowList(): Set<string> {
+  const raw = process.env.ADMIN_ALLOWED_EMAILS ?? "";
+  const list = new Set(
+    raw
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  if (list.size === 0 && isLiveProduction()) {
+    throw new Error(
+      "ADMIN_ALLOWED_EMAILS must be set (comma-separated) in production.",
+    );
+  }
+  return list;
+}

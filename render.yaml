@@ -29,6 +29,10 @@ services:
         generateValue: true
       - key: ADMIN_BOOTSTRAP_PASSWORD
         sync: false
+      # Comma-separated list of admin emails permitted to sign in with
+      # the bootstrap password. REQUIRED in live production.
+      - key: ADMIN_ALLOWED_EMAILS
+        sync: false
       # Qore (NIMC)
       - key: QORE_TOKEN_URL
         sync: false

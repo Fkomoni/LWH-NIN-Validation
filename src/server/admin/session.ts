@@ -1,7 +1,7 @@
 import "server-only";
 import { cookies } from "next/headers";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
-import { requireAdminBootstrapPassword, requireSecret } from "@/lib/secrets";
+import { adminAllowList, requireAdminBootstrapPassword, requireSecret } from "@/lib/secrets";
 
 /**
  * Dev-only admin session. Phase 2 replaces with NextAuth v5 + Leadway
@@ -67,18 +67,32 @@ export async function clearAdminSession(): Promise<void> {
  * Dev allow-list. Replace with a DB lookup + per-admin bcrypt hash in
  * Phase 2. Uses a timing-safe SHA-256 digest compare so the length or
  * early-mismatch of the bootstrap password can't be inferred from
- * response time. Throws in live production if
- * ADMIN_BOOTSTRAP_PASSWORD is missing.
+ * response time. Throws in live production if ADMIN_BOOTSTRAP_PASSWORD
+ * or ADMIN_ALLOWED_EMAILS is missing.
+ *
+ * The email is matched against ADMIN_ALLOWED_EMAILS (comma-separated,
+ * lower-cased). The password comparison always runs so the response
+ * time doesn't reveal whether the submitted email was on the list.
  */
 export function findDevAdmin(email: string, password: string): AdminSession | null {
+  const normalized = email.trim().toLowerCase();
   const want = requireAdminBootstrapPassword();
+
+  // Always run the password compare BEFORE deciding, so timing doesn't
+  // leak whether the email is on the allow-list.
   const got = createHash("sha256").update(password).digest();
   const exp = createHash("sha256").update(want).digest();
-  if (got.length !== exp.length) return null;
-  if (!timingSafeEqual(got, exp)) return null;
+  const passwordOk = got.length === exp.length && timingSafeEqual(got, exp);
+
+  const allow = adminAllowList();
+  // Empty set is only reachable in dev/mock (see adminAllowList); treat
+  // it as "any email is acceptable" so the walkthrough still works.
+  const emailOk = allow.size === 0 ? true : allow.has(normalized);
+
+  if (!(passwordOk && emailOk)) return null;
   return {
-    id: `dev-${email}`,
-    email,
+    id: `dev-${normalized}`,
+    email: normalized,
     role: "ADMIN",
     at: new Date().toISOString(),
   };
