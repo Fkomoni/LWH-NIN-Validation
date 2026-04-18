@@ -213,7 +213,6 @@ export const realPrognosisService: PrognosisService = {
           txnRef: payload.txnRef,
           headerNames: [...headers.keys()],
           authorizationLen: headers.get("Authorization")?.length ?? 0,
-          authorizationHead: headers.get("Authorization")?.slice(0, 12) ?? null,
           authUsesBearer: useBearer,
           keyHeader: keyHeaderName,
         },

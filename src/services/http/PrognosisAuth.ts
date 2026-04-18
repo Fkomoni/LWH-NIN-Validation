@@ -34,13 +34,15 @@ function readToken(body: unknown): string | undefined {
 }
 
 /** Summarise a parsed JSON body for safe logging: key name, type, and
- *  a short prefix of string values. No full token ever leaves the
- *  process, but we get enough signal to spot a mislabelled field. */
-function bodyShape(body: unknown): Array<{ k: string; type: string; len?: number; head?: string }> {
+ *  (for strings) length only. No character-level preview is logged,
+ *  because this endpoint returns a JWT/bearer token and any prefix of
+ *  that material is sensitive. We still get enough signal (keys +
+ *  lengths) to spot a mislabelled field. */
+function bodyShape(body: unknown): Array<{ k: string; type: string; len?: number }> {
   if (!body || typeof body !== "object") return [];
   return Object.entries(body as Record<string, unknown>).map(([k, v]) => {
     if (typeof v === "string")
-      return { k, type: "string", len: v.length, head: v.slice(0, 12) };
+      return { k, type: "string", len: v.length };
     if (v === null) return { k, type: "null" };
     return { k, type: typeof v };
   });
