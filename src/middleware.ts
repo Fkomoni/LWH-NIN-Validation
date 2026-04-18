@@ -114,5 +114,7 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|brand/|images/).*)"],
+  // /api/healthz is excluded so Render's constant health probes don't
+  // mint a trace-id and clone request headers on every hit.
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|brand/|images/|api/healthz).*)"],
 };
