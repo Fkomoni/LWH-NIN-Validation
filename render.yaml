@@ -1,8 +1,10 @@
 # Render blueprint for the LWH NIN Update/Verification portal.
-# Confirmed host: Render. Day-one runs without Postgres — all state
-# (OTP, rate limit, lockout, manual-review queue, Prognosis outbox)
-# lives in in-memory KV. Phase 3 re-adds a managed Postgres block here
-# for audit persistence and the manual-review table.
+#
+# All PII / counter state that used to live in the in-memory KV now
+# flows through Upstash Redis (primary) when the two UPSTASH_* env
+# vars are set; otherwise it falls back to the in-process Map. Live
+# production refuses to boot without a durable KV configured (see
+# src/server/startupCheck.ts).
 
 services:
   - type: web
@@ -20,13 +22,16 @@ services:
         value: "22"
       - key: NEXT_PUBLIC_MOCKS_ENABLED
         value: "false"
-      # App-level secrets — set in the Render dashboard.
+
+      # ── App-level secrets ──────────────────────────────────────────
       - key: AUTH_SECRET
         generateValue: true
       - key: ADMIN_SECRET
         generateValue: true
       - key: OTP_HMAC_SECRET
         generateValue: true
+
+      # Dev-only plaintext password — ignored in production.
       - key: ADMIN_BOOTSTRAP_PASSWORD
         sync: false
       # scrypt-encoded bootstrap credential, REQUIRED in production.
@@ -38,7 +43,36 @@ services:
       # the bootstrap password. REQUIRED in live production.
       - key: ADMIN_ALLOWED_EMAILS
         sync: false
-      # Qore (NIMC)
+      # Comma-separated absolute origins permitted to call mutating
+      # server actions (authStart, adminLogin, etc.). REQUIRED in
+      # live production; assertSameOrigin() fails closed when unset.
+      # Example: https://portal.leadwayhealth.com
+      - key: ALLOWED_ORIGINS
+        sync: false
+
+      # ── Durable KV (Upstash Redis via REST) ────────────────────────
+      # REQUIRED in live production (or DATABASE_URL below). Without
+      # either, startupCheck throws at boot.
+      # Provision at https://upstash.com → Create Database → Redis,
+      # region closest to "oregon", type Regional, eviction allkeys-lru.
+      # Then paste the REST URL + token here.
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
+
+      # ── Database (Prisma / audit persistence) ──────────────────────
+      # OPTIONAL unless AUDIT_DB_ENABLED=true. When you want persistent
+      # audit events, uncomment the `databases` block at the bottom of
+      # this file so Render provisions Postgres and auto-wires
+      # DATABASE_URL; alternatively point to an external Postgres URL
+      # by setting DATABASE_URL manually (sync: false).
+      - key: DATABASE_URL
+        sync: false
+      - key: AUDIT_DB_ENABLED
+        value: "false"
+
+      # ── Qore (NIMC) ────────────────────────────────────────────────
       - key: QORE_TOKEN_URL
         sync: false
       - key: QORE_NIN_VERIFY_URL
@@ -47,7 +81,8 @@ services:
         sync: false
       - key: QORE_SECRET_KEY
         sync: false
-      # Prognosis
+
+      # ── Prognosis ──────────────────────────────────────────────────
       - key: PROGNOSIS_BASE_URL
         value: https://prognosis-api.leadwayhealth.com/api
       - key: PROGNOSIS_USERNAME
@@ -60,12 +95,37 @@ services:
         sync: false
       - key: PROGNOSIS_API_KEY_HEADER
         sync: false
-      # Optional Phase-2 extras
+
+      # ── Bot protection (Cloudflare Turnstile) ──────────────────────
+      # verifyTurnstile() fails closed in production without the
+      # secret. Drop the TURNSTILE_SITE_KEY into the auth forms as
+      # part of the Phase-2 UI follow-up.
       - key: TURNSTILE_SITE_KEY
         sync: false
       - key: TURNSTILE_SECRET_KEY
         sync: false
+
+      # ── Observability ──────────────────────────────────────────────
       - key: SENTRY_DSN
         sync: false
       - key: LOG_LEVEL
         value: info
+
+      # ── Deployment flags ───────────────────────────────────────────
+      # Only enable when the reverse proxy does NOT set x-real-ip but
+      # DOES append a trusted last hop to X-Forwarded-For (and strips
+      # attacker-supplied tail values). Render typically sets
+      # x-real-ip, so leave this empty unless you know you need it.
+      - key: TRUST_XFF_LAST_HOP
+        sync: false
+
+# Uncomment to let Render provision Postgres and auto-wire DATABASE_URL
+# into the web service above. Keep commented if you're using an
+# external Postgres (set DATABASE_URL manually in the dashboard).
+#
+# databases:
+#   - name: lwh-nin-validation-db
+#     plan: starter
+#     region: oregon
+#     databaseName: lwh_nin_validation
+#     user: lwh_app
