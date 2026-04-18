@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Field } from "@/components/ui/field";
 import { Checkbox } from "@/components/ui/checkbox";
 import { authStart, type AuthStartState } from "@/server/actions/auth";
+import { LockoutCountdown } from "./LockoutCountdown";
 
 const initial: AuthStartState = { status: "idle" };
 
@@ -72,11 +73,15 @@ export function AuthStartForm() {
       {state.status === "locked" ? (
         <div
           role="alert"
-          className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm"
+          className="space-y-2 rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm"
         >
-          <p className="font-medium">For security, we've paused this account.</p>
-          <p className="mt-1 text-muted-foreground">
-            Please contact Leadway Support if you think this is a mistake.
+          <p className="font-semibold text-destructive">
+            For security, we&apos;ve paused this account for 48 hours.
+          </p>
+          <p className="text-foreground">
+            Too many unsuccessful sign-in attempts. Please try again in{" "}
+            <LockoutCountdown expiresAt={state.expiresAt} />. If you think this
+            is a mistake, contact Leadway Support.
           </p>
         </div>
       ) : null}

@@ -7,23 +7,28 @@ import { traceId } from "@/lib/ids";
 /**
  * Per-enrolleeId failure counter + 48 h hard lock.
  *
- * Policy (per brief):
- *   - 3 failed auth attempts in a rolling 1 h window ⇒ 48 h hard lock
- *   - "Failed" = wrong DOB, failed NIN-principal validation, or OTP
- *     exhausted
- *   - Surface a *generic* security message; do not tell the user the
- *     lock duration or the reason
- *   - Emit a security-ops email with enrolleeId, timestamp (Africa/Lagos),
- *     IP, UA, attempt count, channel (handled by a separate hook)
+ * Policy (client-confirmed):
+ *   - 3 failed auth attempts → 48 h hard lock, no IP conditional.
+ *   - When a locked member returns to /auth we surface a live
+ *     countdown of hours remaining.
+ *
+ * Note on DoS risk: because lockout is keyed only on enrolleeId, an
+ * attacker who knows a target's Enrollee ID can cause a 48 h DoS with
+ * 3 bad submissions. This is an explicit product trade-off — the
+ * client prioritised UX simplicity and brief-compliance over DoS
+ * resilience. Documented in SECURITY.md §8.
  */
 
 type Channel = "DOB" | "PRINCIPAL_NIN" | "OTP";
 
+interface HardLock {
+  lockedAt: number;
+  reason: Channel;
+  ip: string;
+}
+
 function failKey(enrolleeId: string) {
   return `lock:fail:${enrolleeId}`;
-}
-function failIpKey(enrolleeId: string, ip: string) {
-  return `lock:fail:${enrolleeId}:${ip}`;
 }
 function hardKey(enrolleeId: string) {
   return `lock:hard:${enrolleeId}`;
@@ -31,6 +36,18 @@ function hardKey(enrolleeId: string) {
 
 export async function isLocked(enrolleeId: string): Promise<boolean> {
   return getKv().exists(hardKey(enrolleeId));
+}
+
+/**
+ * Return the millisecond timestamp when this enrollee's hard lock
+ * expires, or null if not locked. Used by the UI to render a live
+ * countdown.
+ */
+export async function getLockExpiry(enrolleeId: string): Promise<number | null> {
+  const kv = getKv();
+  const rec = await kv.get<HardLock>(hardKey(enrolleeId));
+  if (!rec) return null;
+  return rec.lockedAt + appConfig.lockout.hardLockMs;
 }
 
 export interface RecordFailArgs {
@@ -43,21 +60,10 @@ export interface RecordFailArgs {
 export interface FailOutcome {
   locked: boolean;
   attemptsInWindow: number;
+  /** Expiry timestamp of the resulting hard lock, if any. */
+  expiresAt?: number;
 }
 
-/**
- * Record one failed attempt.
- *
- * F-04: The hard-lock decision is gated by **both** counters:
- *   - per-enrollee (global pressure)
- *   - per-(enrollee, IP) (is THIS attacker responsible?)
- *
- * A hard lock only sets when the per-enrollee counter is above 2×
- * the threshold AND the per-(enrollee, IP) counter is above the
- * original threshold. This stops an attacker who knows a target's
- * Enrollee ID from remotely locking them out with 3 bad DOBs from a
- * rotating set of IPs — a real compromise shows up on at least one IP.
- */
 export async function recordFail({
   enrolleeId,
   channel,
@@ -66,29 +72,30 @@ export async function recordFail({
 }: RecordFailArgs): Promise<FailOutcome> {
   const kv = getKv();
   const windowMs = appConfig.lockout.windowMs;
-  const perEnrollee = await kv.pushWindow(failKey(enrolleeId), windowMs);
-  const perTuple = await kv.pushWindow(failIpKey(enrolleeId, ip), windowMs);
+  const count = await kv.pushWindow(failKey(enrolleeId), windowMs);
 
-  const threshold = appConfig.lockout.maxFailuresPerWindow;
-  const locked = perTuple >= threshold && perEnrollee >= threshold * 2;
+  const locked = count >= appConfig.lockout.maxFailuresPerWindow;
+  if (!locked) return { locked: false, attemptsInWindow: count };
 
-  if (locked) {
-    await kv.set(
-      hardKey(enrolleeId),
-      { lockedAt: Date.now(), reason: channel, ip },
-      { ttlMs: appConfig.lockout.hardLockMs },
-    );
-    await audit({
-      action: "auth.locked.set",
-      actorType: "system",
-      actorId: enrolleeId,
-      traceId: traceId(),
-      ip,
-      userAgent,
-      payload: { channel, perEnrollee, perTuple },
-    });
-  }
-  return { locked, attemptsInWindow: perEnrollee };
+  const lockedAt = Date.now();
+  const lock: HardLock = { lockedAt, reason: channel, ip };
+  await kv.set(hardKey(enrolleeId), lock, { ttlMs: appConfig.lockout.hardLockMs });
+
+  await audit({
+    action: "auth.locked.set",
+    actorType: "system",
+    actorId: enrolleeId,
+    traceId: traceId(),
+    ip,
+    userAgent,
+    payload: { channel, attempts: count },
+  });
+
+  return {
+    locked: true,
+    attemptsInWindow: count,
+    expiresAt: lockedAt + appConfig.lockout.hardLockMs,
+  };
 }
 
 export async function clearFailures(enrolleeId: string): Promise<void> {

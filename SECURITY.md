@@ -172,6 +172,7 @@ Security-sensitive libraries and their purpose:
 | OpenTelemetry not wired                    | No distributed tracing beyond `traceId` field                      | Phase 3        |
 | Turnstile keys not set                     | Helper is in place (`src/server/turnstile.ts`) and no-ops          | Phase 2        |
 | CSP uses `'unsafe-inline'` for scripts     | Next 15 App Router requirement; move to nonce-based in hardening   | Phase 5        |
+| Lockout is keyed on enrolleeId only (not IP) | Product choice (brief-compliance + UX simplicity): 3 fails on the enrolleeId trigger a 48 h hard lock, regardless of source IP. An adversary who knows a target's Enrollee ID can cause a 48 h DoS. The portal surfaces a live countdown and the ops console has a one-click reset (`/admin/unlock`). | Accepted |
 | Prognosis NIN-update phone requirement     | Validator demands ≥ 10 digits even for child dependants; we inherit the principal's phone — data-model quirk flagged with client |
 
 ---

@@ -10,7 +10,7 @@ import { setSession } from "@/server/session";
 import { audit } from "@/server/audit";
 import { traceId, txnRef } from "@/lib/ids";
 import { rateLimit } from "@/server/rateLimit";
-import { isLocked, recordFail, clearFailures } from "@/server/lockout";
+import { isLocked, recordFail, clearFailures, getLockExpiry } from "@/server/lockout";
 import { notifyLockout } from "@/server/notify";
 import { enqueuePrognosis } from "@/server/outbox";
 import { notifyNinValidated } from "@/server/notify";
@@ -20,7 +20,9 @@ export type AuthStartState =
   | { status: "idle" }
   | { status: "error"; message: string; fieldErrors?: Record<string, string> }
   | { status: "dob-mismatch"; enrolleeId: string }
-  | { status: "locked" }
+  /** `expiresAt` is a millisecond epoch the client uses to render a
+   *  live countdown of hours/minutes remaining. */
+  | { status: "locked"; expiresAt: number }
   | { status: "rate-limited" };
 
 async function ipAndUa(): Promise<{ ip: string; ua: string }> {
@@ -71,7 +73,8 @@ export async function authStart(
   }
 
   if (await isLocked(parsed.data.enrolleeId)) {
-    return { status: "locked" };
+    const expiresAt = (await getLockExpiry(parsed.data.enrolleeId)) ?? Date.now();
+    return { status: "locked", expiresAt };
   }
 
   const svc = getServices();
@@ -94,12 +97,17 @@ export async function authStart(
         ip,
         userAgent: ua,
       });
-      return { status: "locked" };
+      const expiresAt =
+        outcome.expiresAt ?? (await getLockExpiry(parsed.data.enrolleeId)) ?? Date.now();
+      return { status: "locked", expiresAt };
     }
     return { status: "dob-mismatch", enrolleeId: parsed.data.enrolleeId };
   }
 
-  if (!result.ok && result.reason === "LOCKED") return { status: "locked" };
+  if (!result.ok && result.reason === "LOCKED") {
+    const expiresAt = (await getLockExpiry(parsed.data.enrolleeId)) ?? Date.now();
+    return { status: "locked", expiresAt };
+  }
   if (!result.ok) {
     return {
       status: "error",
@@ -132,7 +140,7 @@ export type PrincipalNinState =
   | { status: "idle" }
   | { status: "error"; message: string; fieldErrors?: Record<string, string> }
   | { status: "fail"; message?: string }
-  | { status: "locked" }
+  | { status: "locked"; expiresAt: number }
   | { status: "rate-limited" };
 
 /**
@@ -171,7 +179,10 @@ export async function authByPrincipalNin(
   const ipLimit = await rateLimit.authIp(ip);
   if (!ipLimit.ok) return { status: "rate-limited" };
 
-  if (await isLocked(parsed.data.enrolleeId)) return { status: "locked" };
+  if (await isLocked(parsed.data.enrolleeId)) {
+    const expiresAt = (await getLockExpiry(parsed.data.enrolleeId)) ?? Date.now();
+    return { status: "locked", expiresAt };
+  }
 
   const svc = getServices();
 
@@ -218,7 +229,9 @@ export async function authByPrincipalNin(
         ip,
         userAgent: ua,
       });
-      return { status: "locked" };
+      const expiresAt =
+        outcome.expiresAt ?? (await getLockExpiry(parsed.data.enrolleeId)) ?? Date.now();
+      return { status: "locked", expiresAt };
     }
     return { status: "fail", message: verify.message };
   }

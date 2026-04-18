@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field } from "@/components/ui/field";
 import { authByPrincipalNin, type PrincipalNinState } from "@/server/actions/auth";
+import { LockoutCountdown } from "@/app/auth/LockoutCountdown";
 
 const initial: PrincipalNinState = { status: "idle" };
 
@@ -40,9 +41,19 @@ export function PrincipalNinForm({ enrolleeId }: { enrolleeId: string }) {
         </p>
       ) : null}
       {state.status === "locked" ? (
-        <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">
-          For security, we've paused this account. Please contact Leadway Support.
-        </p>
+        <div
+          role="alert"
+          className="space-y-2 rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm"
+        >
+          <p className="font-semibold text-destructive">
+            For security, we&apos;ve paused this account for 48 hours.
+          </p>
+          <p className="text-foreground">
+            Too many unsuccessful sign-in attempts. Please try again in{" "}
+            <LockoutCountdown expiresAt={state.expiresAt} />. If you think this
+            is a mistake, contact Leadway Support.
+          </p>
+        </div>
       ) : null}
 
       <div className="flex justify-end">
