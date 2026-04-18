@@ -17,6 +17,7 @@ import { adminResetMember, adminUnlock } from "@/server/lockout";
 import { drainPrognosisOutbox } from "@/server/outbox";
 import { audit } from "@/server/audit";
 import { traceId } from "@/lib/ids";
+import { maskEmail } from "@/lib/mask";
 import { rateLimit } from "@/server/rateLimit";
 import { enrolleeIdSchema } from "@/schemas/auth";
 import { verifyTurnstile } from "@/server/turnstile";
@@ -86,7 +87,11 @@ export async function adminLogin(
       actorType: "system",
       traceId: traceId(),
       ip,
-      payload: { email },
+      // `email` is maskPii'd automatically inside log.info (the key
+      // contains "email"), but audit events should be durable, so we
+      // mask explicitly here too. This keeps enough signal to spot a
+      // repeated-target pattern without storing the raw address.
+      payload: { email: maskEmail(email) },
     });
     return { status: "error", message: "Invalid credentials." };
   }
