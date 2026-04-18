@@ -3,15 +3,21 @@ import type { NextConfig } from "next";
 /**
  * Content-Security-Policy tuned for Next 15 App Router + Server Actions.
  *
- * `unsafe-inline` + `unsafe-eval` for script-src are the Next-recommended
- * defaults until we move to a nonce-based CSP via middleware (tracked as
- * a Phase-5 hardening task). Everything else is locked down to `self`.
- * Upstream APIs (Qore, Prognosis) are called server-side only, so they
- * do NOT need to appear in connect-src.
+ * We keep `'unsafe-inline'` on script-src for the Next-runtime bootstrap
+ * script (next/script inserts inline hydration code). `'unsafe-eval'`
+ * has been removed — the App Router does not require it in production
+ * and its presence would allow a malicious injected payload to escape
+ * via `eval()` / `new Function()`. If a future dependency needs eval,
+ * we should isolate it via a worker or prefer the WASM/strict-csp
+ * replacement rather than re-enabling the directive.
+ *
+ * Everything else is locked down to `self`. Upstream APIs (Qore,
+ * Prognosis) are called server-side only, so they do NOT need to
+ * appear in connect-src.
  */
 const csp = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+  "script-src 'self' 'unsafe-inline'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
@@ -23,13 +29,18 @@ const csp = [
   "upgrade-insecure-requests",
 ].join("; ");
 
+const isProd = process.env.NODE_ENV === "production";
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   experimental: {
     typedRoutes: true,
   },
-  serverExternalPackages: ["msw", "@mswjs/interceptors"],
+  // MSW is used only in dev / mock mode (see src/instrumentation.ts).
+  // We keep it external so it isn't bundled into the production
+  // runtime chunks; production boot refuses to import it anyway.
+  serverExternalPackages: isProd ? [] : ["msw", "@mswjs/interceptors"],
   async headers() {
     return [
       {
