@@ -55,7 +55,15 @@ class UpstashKv implements Kv {
   private unwrap<T>(items: PipelineItem<T>[]): T[] {
     return items.map((it, i) => {
       if ("error" in it) {
-        throw new Error(`upstash.pipeline[${i}]: ${it.error}`);
+        // Log the raw Upstash message once (truncated) so an operator
+        // can see context, but throw a sanitised Error so downstream
+        // stacks / log fan-out don't carry the raw server-side text
+        // (which in principle could contain command arguments).
+        log.error(
+          { idx: i, err: String(it.error).slice(0, 120) },
+          "upstash.pipeline.err",
+        );
+        throw new Error("upstash.pipeline.err");
       }
       return it.result;
     });
