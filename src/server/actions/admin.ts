@@ -20,6 +20,7 @@ import { traceId } from "@/lib/ids";
 import { rateLimit } from "@/server/rateLimit";
 import { enrolleeIdSchema } from "@/schemas/auth";
 import { verifyTurnstile } from "@/server/turnstile";
+import { assertSameOrigin, OriginForbiddenError } from "@/server/origin";
 
 async function clientIp(): Promise<string> {
   const h = await headers();
@@ -42,6 +43,14 @@ export async function adminLogin(
   _prev: AdminLoginState,
   formData: FormData,
 ): Promise<AdminLoginState> {
+  try {
+    await assertSameOrigin();
+  } catch (err) {
+    if (err instanceof OriginForbiddenError) {
+      return { status: "error", message: "Request blocked." };
+    }
+    throw err;
+  }
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
   if (!email || !password)
@@ -139,6 +148,7 @@ export async function resolveReviewAction(
   _prev: { status: "idle" | "done" },
   formData: FormData,
 ): Promise<{ status: "idle" | "done" }> {
+  await assertSameOrigin();
   const admin = await requireAdminRole("OPS");
   const id = String(formData.get("id") ?? "");
   const action = String(formData.get("action") ?? "") as "APPROVED" | "REJECTED";
@@ -157,6 +167,7 @@ export async function resolveReviewAction(
 
 /** F-01: session-gated manual unlock. Requires at least OPS. */
 export async function unlockEnrolleeAction(formData: FormData): Promise<void> {
+  await assertSameOrigin();
   const admin = await requireAdminRole("OPS");
   const parsed = enrolleeIdSchema.safeParse(formData.get("enrolleeId"));
   if (!parsed.success) return;
@@ -168,6 +179,7 @@ export async function drainOutboxAction(): Promise<{
   processed: number;
   remaining: number;
 }> {
+  await assertSameOrigin();
   await requireAdminRole("OPS");
   return drainPrognosisOutbox();
 }
@@ -185,6 +197,14 @@ export async function resetMemberAction(
   _prev: ResetMemberState,
   formData: FormData,
 ): Promise<ResetMemberState> {
+  try {
+    await assertSameOrigin();
+  } catch (err) {
+    if (err instanceof OriginForbiddenError) {
+      return { status: "error", message: "Request blocked." };
+    }
+    throw err;
+  }
   let admin: AdminSession;
   try {
     admin = await requireAdminRole("ADMIN");

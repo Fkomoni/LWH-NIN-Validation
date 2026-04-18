@@ -16,6 +16,7 @@ import { enqueuePrognosis } from "@/server/outbox";
 import { notifyNinValidated } from "@/server/notify";
 import { appConfig } from "@/config/app";
 import { verifyTurnstile } from "@/server/turnstile";
+import { assertSameOrigin, OriginForbiddenError } from "@/server/origin";
 
 export type AuthStartState =
   | { status: "idle" }
@@ -49,6 +50,14 @@ export async function authStart(
   _prev: AuthStartState,
   formData: FormData,
 ): Promise<AuthStartState> {
+  try {
+    await assertSameOrigin();
+  } catch (err) {
+    if (err instanceof OriginForbiddenError) {
+      return { status: "error", message: "Request blocked." };
+    }
+    throw err;
+  }
   const parsed = authStartSchema.safeParse({
     enrolleeId: formData.get("enrolleeId"),
     dob: formData.get("dob"),
@@ -169,6 +178,14 @@ export async function authByPrincipalNin(
   _prev: PrincipalNinState,
   formData: FormData,
 ): Promise<PrincipalNinState> {
+  try {
+    await assertSameOrigin();
+  } catch (err) {
+    if (err instanceof OriginForbiddenError) {
+      return { status: "error", message: "Request blocked." };
+    }
+    throw err;
+  }
   const parsed = principalNinSchema.safeParse({
     enrolleeId: formData.get("enrolleeId"),
     nin: formData.get("nin"),
