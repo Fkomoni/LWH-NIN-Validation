@@ -1,19 +1,22 @@
 import "server-only";
 import type { PrognosisUpdatePayload } from "../types";
+import { appConfig } from "@/config/app";
 
 /**
- * Prognosis HTTP client.
+ * Prognosis HTTP client — MOCK PATH ONLY.
  *
- * We intentionally do NOT invent the real Prognosis request/response
- * shape (brief: "Do not invent API shapes"). The payload object matches
- * the field list in the brief; the mock handler in src/mocks/handlers.ts
- * is the contract until Leadway shares real docs. When that happens,
- * only the `fetch()` target + header/body mapping in this file changes.
+ * This module is used by src/services/mock/PrognosisService.mock.ts
+ * and its fetch() calls are intercepted end-to-end by MSW against
+ * http://mock.prognosis.local/... (see src/mocks/handlers.ts). The
+ * real production write path lives in
+ * src/services/real/PrognosisService.real.ts, which uses a bearer
+ * token from getPrognosisToken().
  *
- * Idempotency: we pass `txnRef` as `Idempotency-Key` so a retry with
- * the same reference doesn't double-write. Whether Prognosis honours
- * this header server-side is TBC — our own dedupe in NinService + the
- * outbox handles the client-side guarantee regardless.
+ * To prevent this unauthenticated client from ever being used in
+ * live mode (which would transmit NIN + DOB to whatever URL is
+ * configured with NO Authorization header), we refuse to run when
+ * mocks are disabled. The previous `http://mock.prognosis.local`
+ * default has been removed — callers must be in mock mode.
  */
 
 export interface PrognosisResult {
@@ -23,11 +26,18 @@ export interface PrognosisResult {
   error?: "DUPLICATE" | "PROVIDER_ERROR";
 }
 
+const MOCK_BASE = "http://mock.prognosis.local";
+
 export async function upsertMemberNin(
   payload: PrognosisUpdatePayload,
   opts: { baseUrl?: string; timeoutMs?: number } = {},
 ): Promise<PrognosisResult> {
-  const base = opts.baseUrl ?? process.env.PROGNOSIS_BASE_URL ?? "http://mock.prognosis.local";
+  if (!appConfig.mocksEnabled) {
+    throw new Error(
+      "prognosis.http.mock-client-used-in-live-mode: use src/services/real/PrognosisService.real.ts",
+    );
+  }
+  const base = opts.baseUrl ?? MOCK_BASE;
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), opts.timeoutMs ?? 5_000);
   try {
