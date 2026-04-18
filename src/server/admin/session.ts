@@ -114,15 +114,17 @@ export function findDevAdmin(email: string, password: string): AdminSession | nu
   const passwordOk = verifyAdminBootstrapPassword(password);
 
   const allow = adminAllowList();
-  // Empty set is only reachable in dev/mock (see adminAllowList); treat
-  // it as "any email is acceptable" so the walkthrough still works.
-  const emailOk = allow.size === 0 ? true : allow.has(normalized);
+  // Empty map is only reachable in dev/mock (see adminAllowList);
+  // treat it as "any email is acceptable as ADMIN" so the walkthrough
+  // still works. In production the map is always populated.
+  const mappedRole = allow.size === 0 ? "ADMIN" : allow.get(normalized);
+  const emailOk = mappedRole !== undefined;
 
   if (!(passwordOk && emailOk)) return null;
   return {
     id: `dev-${normalized}`,
     email: normalized,
-    role: "ADMIN",
+    role: mappedRole,
     at: new Date().toISOString(),
   };
 }

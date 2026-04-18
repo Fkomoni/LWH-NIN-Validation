@@ -123,24 +123,44 @@ export function hashAdminPassword(plaintext: string, nLog2 = 15): string {
 }
 
 /**
- * Comma-separated allow-list of permitted admin email addresses.
- * Throws in live production when unset/empty so the bootstrap login
- * flow cannot accept an attacker-chosen email with the shared
- * ADMIN_BOOTSTRAP_PASSWORD. In dev/mock mode, an empty list is
- * permitted and means "any email" (preserves the walkthrough UX).
+ * Comma-separated allow-list of permitted admin email addresses
+ * with optional per-email role suffix:
+ *
+ *   alice@leadway.com:ADMIN, bob@leadway.com:OPS, carol@leadway.com
+ *
+ * Recognised roles: READ_ONLY | OPS | ADMIN. An entry without a
+ * colon-suffix defaults to READ_ONLY (safest default — explicit
+ * elevation must be intentional). Throws in live production when
+ * unset/empty so the bootstrap login flow cannot accept an
+ * attacker-chosen email with the shared bootstrap password. In
+ * dev/mock mode, an empty list means "any email is permitted as
+ * ADMIN" (preserves the walkthrough UX).
  */
-export function adminAllowList(): Set<string> {
+export type AdminRoleLiteral = "READ_ONLY" | "OPS" | "ADMIN";
+
+const KNOWN_ROLES: ReadonlySet<AdminRoleLiteral> = new Set([
+  "READ_ONLY",
+  "OPS",
+  "ADMIN",
+]);
+
+export function adminAllowList(): Map<string, AdminRoleLiteral> {
   const raw = process.env.ADMIN_ALLOWED_EMAILS ?? "";
-  const list = new Set(
-    raw
-      .split(",")
-      .map((s) => s.trim().toLowerCase())
-      .filter(Boolean),
-  );
-  if (list.size === 0 && isLiveProduction()) {
+  const map = new Map<string, AdminRoleLiteral>();
+  for (const rawItem of raw.split(",")) {
+    const trimmed = rawItem.trim();
+    if (!trimmed) continue;
+    const [emailPart, rolePart] = trimmed.split(":");
+    const email = (emailPart ?? "").trim().toLowerCase();
+    if (!email) continue;
+    const roleUpper = (rolePart ?? "").trim().toUpperCase() as AdminRoleLiteral;
+    const role = KNOWN_ROLES.has(roleUpper) ? roleUpper : "READ_ONLY";
+    map.set(email, role);
+  }
+  if (map.size === 0 && isLiveProduction()) {
     throw new Error(
-      "ADMIN_ALLOWED_EMAILS must be set (comma-separated) in production.",
+      "ADMIN_ALLOWED_EMAILS must be set (comma-separated, optionally with :ROLE suffix) in production.",
     );
   }
-  return list;
+  return map;
 }
