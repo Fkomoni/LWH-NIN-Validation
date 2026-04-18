@@ -48,5 +48,10 @@ async function persistToDb(event: AuditEvent): Promise<void> {
 
 export async function audit(event: AuditEvent) {
   log.info({ ...event, at: new Date().toISOString() }, "audit");
-  await persistToDb(event);
+  // Fire-and-forget the DB write so a slow / offline audit DB cannot
+  // stall the auth or admin action that produced the event. The log
+  // line above is the synchronous source of truth; the DB row is
+  // best-effort durability. persistToDb() already catches its own
+  // errors — `void` here simply tells the engine we don't await.
+  void persistToDb(event);
 }
