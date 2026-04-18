@@ -6,12 +6,14 @@ import { hostname } from "node:os";
  * Centralised env-secret access.
  *
  * Rules:
- *   - Production (NODE_ENV=production AND mocks off) → REQUIRE the
- *     env var; throw at first use if absent or too short.
- *   - Dev / mock mode → derive a **deterministic-per-machine**
- *     fallback from the host name. It is NOT committable and NOT
- *     guessable from the public source, so the previous public-string
- *     fallback class of vulnerability is closed either way.
+ *   - Production (NODE_ENV=production) → REQUIRE the env var; throw
+ *     at first use if absent or too short. The mocks flag does NOT
+ *     widen this: a prod deploy with NEXT_PUBLIC_MOCKS_ENABLED=true
+ *     would otherwise silently fall through to the deterministic
+ *     dev fallback (guessable from the container hostname).
+ *   - Dev / test → derive a **deterministic-per-machine** fallback
+ *     from the host name. It is NOT committable and NOT guessable
+ *     from the public source.
  *
  * The old inline fallbacks (`"dev-only-secret-do-not-use-in-prod"`,
  * `"dev-only-admin-secret"`, `"dev-only-otp-pepper"`) are gone. Those
@@ -22,10 +24,7 @@ import { hostname } from "node:os";
 const MIN_LEN = 24;
 
 function isLiveProduction(): boolean {
-  return (
-    process.env.NODE_ENV === "production" &&
-    process.env.NEXT_PUBLIC_MOCKS_ENABLED !== "true"
-  );
+  return process.env.NODE_ENV === "production";
 }
 
 function deriveDevFallback(name: string): string {
