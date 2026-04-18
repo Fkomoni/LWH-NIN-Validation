@@ -159,6 +159,20 @@ function bodyKeys(body: unknown): string[] {
   return [];
 }
 
+/**
+ * encodeURIComponent every character EXCEPT '/'. The Prognosis
+ * endpoints require raw slashes in enrollee IDs (e.g. "21000645/0")
+ * but must never receive '&' '=' '?' '#' ' ' etc., which a future
+ * schema widening could accidentally allow. Today the Zod regex is
+ * strict — this is defence-in-depth.
+ */
+function encodeEnrolleeForQuery(id: string): string {
+  return id
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+}
+
 async function authedGet(url: string): Promise<{ status: number; body: unknown }> {
   const token = await getPrognosisToken();
   const headers = new Headers();
@@ -180,9 +194,11 @@ export async function getEnrolleeBioData(enrolleeId: string): Promise<PrognosisM
   const base = process.env.PROGNOSIS_BASE_URL;
   if (!base) throw new PrognosisProviderError("prognosis.missing-base-url");
 
-  // Do NOT encodeURIComponent — the Prognosis endpoint expects the raw
-  // slash in the enrollee ID.
-  const url = `${base}/EnrolleeProfile/GetEnrolleeBioDataByEnrolleeID?enrolleeid=${enrolleeId}`;
+  // Prognosis expects the raw slash, so we cannot encodeURIComponent
+  // wholesale. We DO encode every other reserved character so a
+  // future widening of enrolleeIdSchema cannot smuggle '&', '=', '?',
+  // '#', etc. into the query string.
+  const url = `${base}/EnrolleeProfile/GetEnrolleeBioDataByEnrolleeID?enrolleeid=${encodeEnrolleeForQuery(enrolleeId)}`;
 
   let status: number;
   let body: unknown;
@@ -234,7 +250,7 @@ export async function getEnrolleeDependants(enrolleeId: string): Promise<Prognos
   const base = process.env.PROGNOSIS_BASE_URL;
   if (!base) throw new PrognosisProviderError("prognosis.missing-base-url");
 
-  const url = `${base}/EnrolleeProfile/GetEnrolleeDependantsByEnrolleeID?enrolleeid=${enrolleeId}`;
+  const url = `${base}/EnrolleeProfile/GetEnrolleeDependantsByEnrolleeID?enrolleeid=${encodeEnrolleeForQuery(enrolleeId)}`;
 
   let status: number;
   let body: unknown;
