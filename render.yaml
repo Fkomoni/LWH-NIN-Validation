@@ -97,10 +97,10 @@ services:
         sync: false
 
       # ── Bot protection (Cloudflare Turnstile) ──────────────────────
-      # verifyTurnstile() fails closed in production without the
-      # secret. Drop the TURNSTILE_SITE_KEY into the auth forms as
-      # part of the Phase-2 UI follow-up.
-      - key: TURNSTILE_SITE_KEY
+      # verifyTurnstile() fails closed in production when
+      # TURNSTILE_SECRET_KEY is unset. The site key ships to the
+      # browser via NEXT_PUBLIC_* so the widget can render.
+      - key: NEXT_PUBLIC_TURNSTILE_SITE_KEY
         sync: false
       - key: TURNSTILE_SECRET_KEY
         sync: false

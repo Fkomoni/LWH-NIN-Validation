@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field } from "@/components/ui/field";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Turnstile } from "@/components/security/Turnstile";
 import { authStart, type AuthStartState } from "@/server/actions/auth";
 
 const initial: AuthStartState = { status: "idle" };
@@ -86,6 +87,8 @@ export function AuthStartForm() {
           {state.message}
         </p>
       ) : null}
+
+      <Turnstile action="portal-auth" />
 
       <div className="flex items-center justify-end gap-3">
         <Button type="submit" disabled={pending} size="lg">

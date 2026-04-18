@@ -4,6 +4,7 @@ import { useActionState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field } from "@/components/ui/field";
+import { Turnstile } from "@/components/security/Turnstile";
 import { adminLogin, type AdminLoginState } from "@/server/actions/admin";
 
 const initial: AdminLoginState = { status: "idle" };
@@ -28,6 +29,8 @@ export function AdminLoginForm() {
           Too many attempts from this IP or email. Please wait a few minutes and try again.
         </p>
       ) : null}
+      <Turnstile action="admin-login" />
+
       <div className="flex justify-end">
         <Button type="submit" disabled={pending}>
           {pending ? "Signing in…" : "Sign in"}

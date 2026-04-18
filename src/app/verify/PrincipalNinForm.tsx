@@ -4,6 +4,7 @@ import { useActionState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field } from "@/components/ui/field";
+import { Turnstile } from "@/components/security/Turnstile";
 import { authByPrincipalNin, type PrincipalNinState } from "@/server/actions/auth";
 
 const initial: PrincipalNinState = { status: "idle" };
@@ -44,6 +45,8 @@ export function PrincipalNinForm({ enrolleeId }: { enrolleeId: string }) {
           For security, we've paused this account. Please contact Leadway Support.
         </p>
       ) : null}
+
+      <Turnstile action="portal-principal-nin" />
 
       <div className="flex justify-end">
         <Button type="submit" disabled={pending} size="lg">

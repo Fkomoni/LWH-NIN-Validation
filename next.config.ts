@@ -17,11 +17,17 @@ import type { NextConfig } from "next";
  */
 const csp = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline'",
+  // 'unsafe-inline' retained for next/script hydration. Turnstile's
+  // api.js is loaded from challenges.cloudflare.com.
+  "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
-  "connect-src 'self'",
+  // connect-src includes challenges.cloudflare.com for the Turnstile
+  // siteverify callback the widget performs client-side.
+  "connect-src 'self' https://challenges.cloudflare.com",
+  // Turnstile renders inside an iframe; allow embedding from Cloudflare.
+  "frame-src https://challenges.cloudflare.com",
   "frame-ancestors 'none'",
   "form-action 'self'",
   "base-uri 'self'",

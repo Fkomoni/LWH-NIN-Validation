@@ -1,9 +1,10 @@
 /**
  * PII masking helpers. Any log line, analytics event, or error payload that
  * touches user data MUST go through one of these. See OWASP ASVS v4 L2.
+ *
+ * This file is runtime-neutral (no node:* imports) so it can be pulled
+ * into any build target — Edge middleware, Node server, tests.
  */
-
-import { createHash } from "node:crypto";
 
 /** Keep the last 3 digits of an 11-digit NIN; hide the rest. */
 export function maskNin(nin: string): string {
@@ -38,16 +39,28 @@ export function maskName(name: string): string {
 }
 
 /**
- * Hash-prefix for business identifiers that are not strict PII but
- * should not be written to logs in clear (enrolleeId, memberId,
- * actorId). sha256 → first 10 hex chars; deterministic so operators
- * can still correlate journeys across log lines, but the raw ID is
- * no longer present in a log-pipeline breach.
+ * Opaque stable tag for business identifiers that are not strict PII
+ * but should not be logged in clear (enrolleeId, memberId, actorId).
+ * The mapping is deterministic so operators can correlate journeys
+ * across log lines, but the raw ID is no longer visible in a
+ * log-pipeline breach.
+ *
+ * This is NOT a cryptographic hash — collisions are possible. It is
+ * only a log-hygiene aid. For cryptographic pseudonymisation, use
+ * the server-only audit store.
  */
+function fnv1a(s: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+
 export function maskId(id: string): string {
   if (!id) return "***";
-  const h = createHash("sha256").update(id).digest("hex");
-  return `id_${h.slice(0, 10)}`;
+  return `id_${fnv1a(id)}`;
 }
 
 /** Safe deep-mask helper for structured log payloads. */
