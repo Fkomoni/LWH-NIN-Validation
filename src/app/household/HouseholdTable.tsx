@@ -167,7 +167,23 @@ export function HouseholdTable({ household }: { household: Household }) {
                     Validate
                   </Button>
                 </div>
-              ) : null}
+              ) : (
+                // Already-validated row — show the masked NIN that is
+                // on file so the member can see why the input is hidden
+                // and avoid trying to re-upload.
+                <div className="mt-3 rounded-md border bg-muted/30 p-3 text-sm">
+                  <p className="text-foreground">
+                    <span className="text-muted-foreground">NIN on file: </span>
+                    <span className="font-mono tracking-wider">
+                      ••••••••{p.ninLast3 ?? "•••"}
+                    </span>
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    This NIN is already linked to the record. No further action
+                    is needed.
+                  </p>
+                </div>
+              )}
               {r.message ? (
                 <p className={`mt-3 text-sm ${
                   r.status === "FAILED" ? "text-destructive" : "text-muted-foreground"
