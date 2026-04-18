@@ -91,11 +91,20 @@ function verifyScryptEncoded(candidate: string, encoded: string): boolean {
     const parts = encoded.split("$");
     if (parts.length !== 4 || parts[0] !== "scrypt") return false;
     const nLog2 = Number(parts[1]);
-    if (!Number.isInteger(nLog2) || nLog2 < 14 || nLog2 > 20) return false;
+    // 2^15 .. 2^20. Lower than 2^15 is too weak for an interactive
+    // bootstrap credential against 2024+ GPU throughput.
+    if (!Number.isInteger(nLog2) || nLog2 < 15 || nLog2 > 20) return false;
     const salt = Buffer.from(parts[2]!, "base64");
     const key = Buffer.from(parts[3]!, "base64");
+    // Node's scrypt default maxmem (32 MB) is exceeded around N=2^17;
+    // raise the ceiling explicitly so high-cost hashes work.
     const N = 1 << nLog2;
-    const derived = scryptSync(candidate, salt, key.length, { N, r: 8, p: 1 });
+    const derived = scryptSync(candidate, salt, key.length, {
+      N,
+      r: 8,
+      p: 1,
+      maxmem: 256 * 1024 * 1024,
+    });
     return derived.length === key.length && timingSafeEqual(derived, key);
   } catch {
     return false;
@@ -114,11 +123,20 @@ function timingSafeEqualString(a: string, b: string): boolean {
  * string to paste into ADMIN_BOOTSTRAP_PASSWORD_HASH. Kept here so a
  * one-liner works in a dev REPL without extra files:
  *   node -e "import('./src/lib/secrets').then(m => console.log(m.hashAdminPassword('my-new-password')))"
+ *
+ * Default N = 2^17 (131072). This takes roughly 100 ms on a modern
+ * server CPU — acceptable for a bootstrap login and well-matched to
+ * the offline cracking threat model for a single shared credential.
  */
-export function hashAdminPassword(plaintext: string, nLog2 = 15): string {
+export function hashAdminPassword(plaintext: string, nLog2 = 17): string {
   const salt = randomBytes(16);
   const N = 1 << nLog2;
-  const key = scryptSync(plaintext, salt, 32, { N, r: 8, p: 1 });
+  const key = scryptSync(plaintext, salt, 32, {
+    N,
+    r: 8,
+    p: 1,
+    maxmem: 256 * 1024 * 1024,
+  });
   return `scrypt$${nLog2}$${salt.toString("base64")}$${key.toString("base64")}`;
 }
 
