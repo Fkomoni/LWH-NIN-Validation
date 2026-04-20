@@ -4,7 +4,14 @@ import type { AuthSession, Household, NinValidationResult } from "@/types/domain
 
 export type MemberLookupResult =
   | { ok: true; household: Household }
-  | { ok: false; reason: "NOT_FOUND" | "LOCKED" | "DOB_MISMATCH" | "PROVIDER_ERROR" };
+  | { ok: false; reason: "NOT_FOUND" | "LOCKED" | "PROVIDER_ERROR" }
+  | {
+      ok: false;
+      reason: "DOB_MISMATCH";
+      /** Full name of the matched enrollee, for partial masking in the
+       *  error screen. Absent when the enrollee does not exist. */
+      memberFullName?: string;
+    };
 
 export interface MemberService {
   /** Lookup by enrolleeId + DOB. Returns household on match. */

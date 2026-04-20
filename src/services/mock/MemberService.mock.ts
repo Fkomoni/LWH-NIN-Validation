@@ -16,7 +16,11 @@ export const mockMemberService: MemberService = {
     const hh = households[enrolleeId];
     if (!hh) return { ok: false, reason: "NOT_FOUND" };
     if (!dobMatches(hh.principal.dob, dob)) {
-      return { ok: false, reason: "DOB_MISMATCH" };
+      return {
+        ok: false,
+        reason: "DOB_MISMATCH",
+        memberFullName: hh.principal.fullName,
+      };
     }
     return { ok: true, household: hh };
   },
@@ -27,7 +31,11 @@ export const mockMemberService: MemberService = {
     if (!hh) return { ok: false, reason: "NOT_FOUND" };
     const ref = validPrincipalNins[enrolleeId];
     if (!ref || ref.nin !== nin || !dobMatches(ref.dob, dob)) {
-      return { ok: false, reason: "DOB_MISMATCH" };
+      return {
+        ok: false,
+        reason: "DOB_MISMATCH",
+        memberFullName: hh.principal.fullName,
+      };
     }
     return { ok: true, household: hh };
   },

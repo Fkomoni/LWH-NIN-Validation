@@ -15,11 +15,19 @@ import { notifyLockout } from "@/server/notify";
 import { enqueuePrognosis } from "@/server/outbox";
 import { notifyNinValidated } from "@/server/notify";
 import { appConfig } from "@/config/app";
+import { composeDobMismatchMessage } from "@/lib/displayName";
 
 export type AuthStartState =
   | { status: "idle" }
   | { status: "error"; message: string; fieldErrors?: Record<string, string> }
-  | { status: "dob-mismatch"; enrolleeId: string }
+  | {
+      status: "dob-mismatch";
+      enrolleeId: string;
+      /** Fully-formed "Enrollee with Firxxx Surxxx … does not match our
+       *  records." — composed server-side with a masked name + the
+       *  DOB the user typed formatted dd/mm/yyyy. */
+      message: string;
+    }
   /** `expiresAt` is a millisecond epoch the client uses to render a
    *  live countdown of hours/minutes remaining. */
   | { status: "locked"; expiresAt: number }
@@ -101,7 +109,18 @@ export async function authStart(
         outcome.expiresAt ?? (await getLockExpiry(parsed.data.enrolleeId)) ?? Date.now();
       return { status: "locked", expiresAt };
     }
-    return { status: "dob-mismatch", enrolleeId: parsed.data.enrolleeId };
+    // DOB_MISMATCH carries the real member's full name so the UI can
+    // partially mask it and confirm with the user that we are
+    // matching against the right record. NOT_FOUND has no name
+    // (enrollee doesn't exist), so the composed message falls back
+    // to a generic masked form.
+    const fullName =
+      !result.ok && result.reason === "DOB_MISMATCH" ? result.memberFullName : undefined;
+    return {
+      status: "dob-mismatch",
+      enrolleeId: parsed.data.enrolleeId,
+      message: composeDobMismatchMessage(fullName, parsed.data.dob),
+    };
   }
 
   if (!result.ok && result.reason === "LOCKED") {

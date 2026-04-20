@@ -54,11 +54,12 @@ export function AuthStartForm() {
       {state.status === "dob-mismatch" ? (
         <div
           role="alert"
-          className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm"
+          className="space-y-2 rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm"
         >
-          <p className="font-medium">We couldn't match those details.</p>
-          <p className="mt-1 text-muted-foreground">
-            Please double-check them, or{" "}
+          <p className="font-semibold text-destructive">Validation Error</p>
+          <p className="text-foreground">{state.message}</p>
+          <p className="text-muted-foreground">
+            Please double-check the date, or{" "}
             <Link
               href={`/verify?enrolleeId=${encodeURIComponent(state.enrolleeId)}`}
               className="text-primary underline underline-offset-2"

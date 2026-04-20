@@ -12,6 +12,7 @@ import { enqueueReview } from "@/server/admin/reviews";
 import { getKv } from "@/server/kv";
 import { log } from "@/lib/logger";
 import { maskName } from "@/lib/mask";
+import { composeDobMismatchMessage } from "@/lib/displayName";
 
 /**
  * Production NinService. Uses QoreID for the NIMC lookup. Idempotency
@@ -194,14 +195,17 @@ export const realNinService: NinService = {
     );
 
     if (!dobMatched) {
+      // Use the NIN-derived DOB as the "inserted" date in the message:
+      // it is what the NIN carries, which is what Prognosis will compare
+      // against. The name is the principal on file (from Prognosis).
+      const composed = composeDobMismatchMessage(expectedFullName, resp.dob ?? providedDob);
       return {
         match: false,
         dobMatched: false,
         nameScore: score,
         verifiedFullName: resp.fullName,
         dobFromNin: resp.dob,
-        message:
-          "The date of birth on this NIN doesn't match the one we have on file. Please double-check the NIN and try again, or contact Leadway Support.",
+        message: `Validation Error. ${composed}`,
       };
     }
     if (!nameOk) {

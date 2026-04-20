@@ -9,6 +9,7 @@ import { scoreNameMatch } from "@/lib/validation/scoreName";
 import { dobMatches } from "@/lib/validation/dob";
 import { supportRef, traceId } from "@/lib/ids";
 import { enqueueReview } from "@/server/admin/reviews";
+import { composeDobMismatchMessage } from "@/lib/displayName";
 
 /**
  * Phase-1 NinService implementation. It performs:
@@ -164,14 +165,14 @@ export const mockNinService: NinService = {
     const dobMatched = fixture.dob && expectedDob ? dobMatches(expectedDob, fixture.dob) : false;
     const { score } = scoreNameMatch(expectedFullName, fixture.fullName ?? "");
     if (!dobMatched) {
+      const composed = composeDobMismatchMessage(expectedFullName, fixture.dob ?? providedDob);
       return {
         match: false,
         dobMatched: false,
         nameScore: score,
         verifiedFullName: fixture.fullName,
         dobFromNin: fixture.dob,
-        message:
-          "The date of birth on this NIN doesn't match the one we have on file. Please double-check the NIN and try again.",
+        message: `Validation Error. ${composed}`,
       };
     }
     return {

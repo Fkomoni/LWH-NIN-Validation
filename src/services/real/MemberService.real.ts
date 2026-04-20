@@ -121,7 +121,13 @@ export const realMemberService: MemberService = {
       "auth.dob.compare",
     );
 
-    if (!matched) return { ok: false, reason: "DOB_MISMATCH" };
+    if (!matched) {
+      return {
+        ok: false,
+        reason: "DOB_MISMATCH",
+        memberFullName: res.household.principal.fullName,
+      };
+    }
     return { ok: true, household: res.household };
   },
 
@@ -133,7 +139,11 @@ export const realMemberService: MemberService = {
     if (res.kind === "not-found") return { ok: false, reason: "NOT_FOUND" };
 
     if (!dobMatches(res.household.principal.dob, dob)) {
-      return { ok: false, reason: "DOB_MISMATCH" };
+      return {
+        ok: false,
+        reason: "DOB_MISMATCH",
+        memberFullName: res.household.principal.fullName,
+      };
     }
     return { ok: true, household: res.household };
   },
