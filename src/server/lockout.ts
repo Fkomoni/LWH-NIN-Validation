@@ -33,9 +33,41 @@ function failKey(enrolleeId: string) {
 function hardKey(enrolleeId: string) {
   return `lock:hard:${enrolleeId}`;
 }
+function ipFailKey(ip: string) {
+  return `lock:ipfail:${ip}`;
+}
+function ipSoftKey(ip: string) {
+  return `lock:ipsoft:${ip}`;
+}
 
 export async function isLocked(enrolleeId: string): Promise<boolean> {
   return getKv().exists(hardKey(enrolleeId));
+}
+
+/**
+ * IP-level soft block. Orthogonal to per-enrollee lockout: catches
+ * credential-stuffing where the attacker rotates Enrollee IDs from a
+ * single origin. When hit, callers return the same generic
+ * rate-limited shape the UI already handles — no account-level audit.
+ */
+export async function isIpSoftLocked(ip: string): Promise<boolean> {
+  return getKv().exists(ipSoftKey(ip));
+}
+
+/**
+ * Push an IP failure onto the sliding window and arm a soft lock if
+ * the window crosses threshold. Safe to call from both real
+ * authentication failures and from early schema rejections — the
+ * whole point is to make scripted probing expensive.
+ */
+export async function recordIpFail(ip: string): Promise<{ locked: boolean; count: number }> {
+  const kv = getKv();
+  const count = await kv.pushWindow(ipFailKey(ip), appConfig.ipLockout.windowMs);
+  if (count >= appConfig.ipLockout.maxFailuresPerWindow) {
+    await kv.set(ipSoftKey(ip), 1, { ttlMs: appConfig.ipLockout.softLockMs });
+    return { locked: true, count };
+  }
+  return { locked: false, count };
 }
 
 /**

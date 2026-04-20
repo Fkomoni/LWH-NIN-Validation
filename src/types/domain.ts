@@ -50,6 +50,10 @@ export interface NinValidationResult {
 
 export interface AuthSession {
   enrolleeId: string;
+  /** Opaque session id. Minted at sign-in; used as the key for the
+   *  server-side revocation denylist so logout can invalidate the
+   *  signed cookie before its natural expiry. */
+  sid: string;
   /** Wall-clock when the session was first issued (bounds absoluteMs). */
   authedAt: string;
   /** Wall-clock of the last authenticated request (bounds idleMs). */

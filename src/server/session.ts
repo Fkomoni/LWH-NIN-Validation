@@ -3,18 +3,24 @@
  *
  * Why not NextAuth yet? NextAuth v5 lands in Phase 2 with real providers.
  * In Phase 1 we only need: "is this browser currently authed, and as whom".
- * The cookie is httpOnly, secure, sameSite=lax, and HMAC-signed so the
- * server can detect tampering. It carries no PII — only the enrolleeId +
- * channel + issued-at.
+ * The cookie is httpOnly, secure, sameSite=strict, and HMAC-signed so the
+ * server can detect tampering. It carries the enrolleeId, channel,
+ * issued-at, and an opaque `sid` used as the revocation handle — no PII.
  */
 import "server-only";
 import { cookies } from "next/headers";
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import type { AuthSession } from "@/types/domain";
 import { appConfig } from "@/config/app";
 import { requireSecret } from "@/lib/secrets";
+import { getKv } from "./kv";
 
 const COOKIE_NAME = "lwh_session";
+const REVOKED_PREFIX = "revoked:sid:";
+
+function revokedKey(sid: string) {
+  return `${REVOKED_PREFIX}${sid}`;
+}
 
 function sign(payload: string): string {
   return createHmac("sha256", requireSecret("AUTH_SECRET"))
@@ -59,7 +65,15 @@ export async function getSession(): Promise<AuthSession | null> {
   const store = await cookies();
   const raw = store.get(COOKIE_NAME)?.value;
   if (!raw) return null;
-  return decode(raw);
+  const s = decode(raw);
+  if (!s) return null;
+  // F1 (IT finding): enforce the server-side revocation denylist.
+  // An HMAC-signed cookie is self-validating, but logout must be able
+  // to kill an intercepted copy before absoluteMs elapses. The
+  // denylist entry is written for `absoluteMs` so a replay can't
+  // outlive the original session window.
+  if (s.sid && (await getKv().exists(revokedKey(s.sid)))) return null;
+  return s;
 }
 
 function cookieOptions() {
@@ -74,13 +88,37 @@ function cookieOptions() {
   };
 }
 
-export async function setSession(session: AuthSession): Promise<void> {
+/**
+ * Mint a fresh signed-cookie session. `sid` is always server-generated
+ * here — callers don't own it because it's the opaque revocation
+ * handle, not a client-addressable identifier.
+ */
+export async function setSession(
+  session: Omit<AuthSession, "sid">,
+): Promise<void> {
   const store = await cookies();
-  store.set(COOKIE_NAME, encode(session), cookieOptions());
+  const full: AuthSession = { ...session, sid: randomUUID() };
+  store.set(COOKIE_NAME, encode(full), cookieOptions());
 }
 
+/**
+ * Clear the session cookie AND add its sid to the server-side
+ * revocation denylist so an intercepted copy of the cookie cannot be
+ * replayed until its natural expiry.
+ *
+ * The denylist TTL matches the session's absolute lifetime — past that
+ * point `decode()` would reject the signature anyway, so no point
+ * holding the entry in KV.
+ */
 export async function clearSession(): Promise<void> {
   const store = await cookies();
+  const raw = store.get(COOKIE_NAME)?.value;
+  if (raw) {
+    const s = decode(raw);
+    if (s?.sid) {
+      await getKv().set(revokedKey(s.sid), 1, { ttlMs: appConfig.session.absoluteMs });
+    }
+  }
   store.set(COOKIE_NAME, "", { maxAge: 0, path: "/" });
 }
 

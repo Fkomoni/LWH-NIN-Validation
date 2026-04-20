@@ -18,12 +18,27 @@ export const appConfig = {
   },
 
   /**
-   * Rate limits — per brief.
+   * Rate limits — per brief. `authPerMinPerIp` was lowered from 10 →
+   * 5 in response to IT finding F2 (high brute-force window).
    */
   rateLimits: {
-    authPerMinPerIp: 10,
+    authPerMinPerIp: 5,
     ninValidatePerHourPerEnrollee: 5,
     otpPerHourPerPhone: 3,
+  },
+
+  /**
+   * IP-level soft lockout. Complements the per-enrollee hard lock so
+   * credential-stuffing campaigns that rotate Enrollee IDs from a
+   * single IP are caught even when no single account trips its
+   * dedicated counter. 10 auth failures in 10 minutes from one IP →
+   * 30-minute soft block. "Soft" = cleared by TTL, never audited as a
+   * hard account action.
+   */
+  ipLockout: {
+    maxFailuresPerWindow: 10,
+    windowMs: 10 * 60 * 1000,
+    softLockMs: 30 * 60 * 1000,
   },
 
   /**

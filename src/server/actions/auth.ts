@@ -10,7 +10,15 @@ import { setSession } from "@/server/session";
 import { audit } from "@/server/audit";
 import { traceId, txnRef } from "@/lib/ids";
 import { rateLimit } from "@/server/rateLimit";
-import { isLocked, recordFail, clearFailures, clearLockout, getLockExpiry } from "@/server/lockout";
+import {
+  isLocked,
+  recordFail,
+  clearFailures,
+  clearLockout,
+  getLockExpiry,
+  isIpSoftLocked,
+  recordIpFail,
+} from "@/server/lockout";
 import { notifyLockout } from "@/server/notify";
 import { enqueuePrognosis } from "@/server/outbox";
 import { notifyNinValidated } from "@/server/notify";
@@ -58,21 +66,34 @@ export async function authStart(
   _prev: AuthStartState,
   formData: FormData,
 ): Promise<AuthStartState> {
+  const tid = traceId();
+  const { ip, ua } = await ipAndUa();
+
+  // F2 gate: if this IP is soft-locked from too many recent failures
+  // across any enrollees, short-circuit before doing any work. Returned
+  // as the generic rate-limited state so the UI stays uniform.
+  if (await isIpSoftLocked(ip)) {
+    await audit({ action: "auth.iplock.block", actorType: "system", traceId: tid, ip });
+    return { status: "rate-limited" };
+  }
+
   const parsed = authStartSchema.safeParse({
     enrolleeId: formData.get("enrolleeId"),
     dob: formData.get("dob"),
     consent: formData.get("consent") === "on",
   });
   if (!parsed.success) {
+    // Count schema rejects against the IP (not the enrollee) so
+    // scripted probes that never pass validation still arm the IP
+    // soft-lock. Legit user typos don't touch the per-enrollee counter
+    // — only a complete, real failed attempt does.
+    await recordIpFail(ip);
     return {
       status: "error",
       message: "Please check the highlighted fields.",
       fieldErrors: fieldErrorsFrom(parsed.error.issues),
     };
   }
-
-  const tid = traceId();
-  const { ip, ua } = await ipAndUa();
 
   const ipLimit = await rateLimit.authIp(ip);
   if (!ipLimit.ok) {
@@ -90,6 +111,7 @@ export async function authStart(
 
   if (!result.ok && (result.reason === "DOB_MISMATCH" || result.reason === "NOT_FOUND")) {
     const outcome = await recordFail({ enrolleeId: parsed.data.enrolleeId, channel: "DOB", ip, userAgent: ua });
+    await recordIpFail(ip);
     await audit({
       action: `auth.dob.${result.reason === "NOT_FOUND" ? "not_found" : "mismatch"}`,
       actorType: "portal-user",
@@ -179,21 +201,27 @@ export async function authByPrincipalNin(
   _prev: PrincipalNinState,
   formData: FormData,
 ): Promise<PrincipalNinState> {
+  const tid = traceId();
+  const { ip, ua } = await ipAndUa();
+
+  if (await isIpSoftLocked(ip)) {
+    await audit({ action: "auth.iplock.block", actorType: "system", traceId: tid, ip });
+    return { status: "rate-limited" };
+  }
+
   const parsed = principalNinSchema.safeParse({
     enrolleeId: formData.get("enrolleeId"),
     nin: formData.get("nin"),
     dob: formData.get("dob"),
   });
   if (!parsed.success) {
+    await recordIpFail(ip);
     return {
       status: "error",
       message: "Please check the highlighted fields.",
       fieldErrors: fieldErrorsFrom(parsed.error.issues),
     };
   }
-
-  const tid = traceId();
-  const { ip, ua } = await ipAndUa();
 
   const ipLimit = await rateLimit.authIp(ip);
   if (!ipLimit.ok) return { status: "rate-limited" };
@@ -234,6 +262,7 @@ export async function authByPrincipalNin(
       ip,
       userAgent: ua,
     });
+    await recordIpFail(ip);
     await audit({
       action: "auth.principalNin.fail",
       actorType: "portal-user",
