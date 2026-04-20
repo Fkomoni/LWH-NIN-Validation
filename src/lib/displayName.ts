@@ -25,22 +25,22 @@ export function formatIsoDobToDdMmYyyy(iso: string | undefined | null): string {
 }
 
 /**
- * Compose the "Enrollee with Firxxx Surxxx (partially shown) with
- * the inserted date of birth dd/mm/yyyy does not match our records."
- * error string used at `/auth` and on the NIN fallback.
+ * Compose the "Enrollee with Firxxx Othxxx Surxxx (partially shown)
+ * with the inserted date of birth dd/mm/yyyy does not match our
+ * records." error string used at `/auth` and on the NIN fallback.
  *
- * `fullName` is split on whitespace — first token becomes the "first
- * name", last token becomes the "last name". For single-word names
- * we fall back to just the one name.
+ * Expects `fullName` to arrive in FirstName OtherName Surname order —
+ * PrognosisMemberClient builds it that way from the atomic fields.
+ * Every whitespace-separated token is masked, preserving order.
  */
 export function composeDobMismatchMessage(
   fullName: string | undefined,
   dobIso: string,
 ): string {
   const parts = (fullName ?? "").trim().split(/\s+/).filter(Boolean);
-  const firstMasked = maskNamePartial(parts[0]);
-  const lastMasked =
-    parts.length > 1 ? ` ${maskNamePartial(parts[parts.length - 1])}` : "";
+  const masked = parts.length
+    ? parts.map(maskNamePartial).join(" ")
+    : maskNamePartial("");
   const dob = formatIsoDobToDdMmYyyy(dobIso);
-  return `Enrollee with ${firstMasked}${lastMasked} (partially shown) with the inserted date of birth ${dob} does not match our records.`;
+  return `Enrollee with ${masked} (partially shown) with the inserted date of birth ${dob} does not match our records.`;
 }

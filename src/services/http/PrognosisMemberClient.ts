@@ -55,18 +55,20 @@ function normaliseDob(raw?: string): string | undefined {
 }
 
 function fullNameFromBody(b: Body): string | undefined {
-  // Prognosis returns the concatenated name as `Member_CustomerName`.
-  // Fall through to FirstName + othernames + Surname if that field is
-  // absent, then finally to the generic Name / FullName casings.
-  const customer = str(b, ["Member_CustomerName", "CustomerName"]);
-  if (customer) return customer;
-
+  // Build the name in FirstName OtherName Surname order when the
+  // atomic Prognosis fields are present. `Member_CustomerName` is a
+  // concatenated display field whose internal order isn't guaranteed,
+  // so we prefer the explicit composition and only fall back to the
+  // bulk field if the parts are missing.
   const prognosisParts = [
     str(b, ["Member_FirstName"]),
     str(b, ["Member_othernames", "Member_OtherNames", "Member_MiddleName"]),
     str(b, ["Member_Surname", "Member_LastName"]),
   ].filter(Boolean);
   if (prognosisParts.length) return prognosisParts.join(" ");
+
+  const customer = str(b, ["Member_CustomerName", "CustomerName"]);
+  if (customer) return customer;
 
   const direct = str(b, ["FullName", "fullName", "full_name", "Name", "name"]);
   if (direct) return direct;
