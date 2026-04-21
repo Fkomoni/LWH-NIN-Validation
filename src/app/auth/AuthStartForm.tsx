@@ -58,6 +58,13 @@ export function AuthStartForm() {
         >
           <p className="font-semibold text-destructive">Validation Error</p>
           <p className="text-foreground">{state.message}</p>
+          {state.attemptsRemaining > 0 ? (
+            <p className="font-medium text-destructive">
+              {state.attemptsRemaining === 1
+                ? "Warning: 1 attempt remaining before your account is locked for 48 hours."
+                : `${state.attemptsRemaining} attempts remaining before your account is locked for 48 hours.`}
+            </p>
+          ) : null}
           <p className="text-muted-foreground">
             Please double-check the date, or{" "}
             <Link

@@ -31,9 +31,16 @@ export function PrincipalNinForm({ enrolleeId }: { enrolleeId: string }) {
       </Field>
 
       {state.status === "fail" ? (
-        <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">
-          {state.message ?? "We couldn't verify those details. Please double-check and try again."}
-        </p>
+        <div role="alert" className="space-y-1 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">
+          <p>{state.message ?? "We couldn't verify those details. Please double-check and try again."}</p>
+          {state.attemptsRemaining > 0 ? (
+            <p className="font-medium text-destructive">
+              {state.attemptsRemaining === 1
+                ? "Warning: 1 attempt remaining before your account is locked for 48 hours."
+                : `${state.attemptsRemaining} attempts remaining before your account is locked for 48 hours.`}
+            </p>
+          ) : null}
+        </div>
       ) : null}
       {state.status === "rate-limited" ? (
         <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">

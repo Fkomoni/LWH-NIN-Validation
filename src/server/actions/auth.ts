@@ -35,6 +35,8 @@ export type AuthStartState =
        *  records." — composed server-side with a masked name + the
        *  DOB the user typed formatted dd/mm/yyyy. */
       message: string;
+      /** How many more attempts before the 48-hour lockout fires. */
+      attemptsRemaining: number;
     }
   /** `expiresAt` is a millisecond epoch the client uses to render a
    *  live countdown of hours/minutes remaining. */
@@ -138,10 +140,15 @@ export async function authStart(
     // to a generic masked form.
     const fullName =
       !result.ok && result.reason === "DOB_MISMATCH" ? result.memberFullName : undefined;
+    const attemptsRemaining = Math.max(
+      0,
+      appConfig.lockout.maxFailuresPerWindow - outcome.attemptsInWindow,
+    );
     return {
       status: "dob-mismatch",
       enrolleeId: parsed.data.enrolleeId,
       message: composeDobMismatchMessage(fullName, parsed.data.dob),
+      attemptsRemaining,
     };
   }
 
@@ -180,7 +187,7 @@ export async function authStart(
 export type PrincipalNinState =
   | { status: "idle" }
   | { status: "error"; message: string; fieldErrors?: Record<string, string> }
-  | { status: "fail"; message?: string }
+  | { status: "fail"; message?: string; attemptsRemaining: number }
   | { status: "locked"; expiresAt: number }
   | { status: "rate-limited" };
 
@@ -282,7 +289,11 @@ export async function authByPrincipalNin(
         outcome.expiresAt ?? (await getLockExpiry(parsed.data.enrolleeId)) ?? Date.now();
       return { status: "locked", expiresAt };
     }
-    return { status: "fail", message: verify.message };
+    const attemptsRemaining = Math.max(
+      0,
+      appConfig.lockout.maxFailuresPerWindow - outcome.attemptsInWindow,
+    );
+    return { status: "fail", message: verify.message, attemptsRemaining };
   }
 
   // Successful NIN+Prognosis-DOB match proves identity; wipe any
