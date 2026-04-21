@@ -126,13 +126,18 @@ These are tracked in `docs/architecture/open-questions.md` and are
 - **Support phone / email / hours.** Placeholders appear in the
   support block. Swap in `src/config/app.ts` and redeploy when Leadway
   supplies the real details.
-- **Upstash Redis.** The in-memory KV is fine for a single Render
-  instance. Set `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`
-  before scaling horizontally (Phase 3).
+- **Upstash Redis — required in production.** The in-memory KV does
+  not survive an instance restart or Render's idle spin-down, which
+  lets lockout counters and the session-revocation denylist reset
+  between probes (IT finding F2 root cause). Provision Upstash and
+  set `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`; `getKv()`
+  picks it up automatically. Without these the app logs a
+  `kv.memory-in-prod` warning on startup and keeps serving, but the
+  security posture regresses.
 - **Database persistence.** Postgres is provisioned but the app does
   not yet write to it (Phase 3). Rate limits, lockouts, OTP state,
-  manual reviews, and the outbox all live in KV today. Nothing that
-  survives a restart. This is acceptable for the initial rollout.
+  manual reviews, and the outbox all live in KV — so they also benefit
+  from Upstash persistence once the env vars are set.
 
 ---
 
