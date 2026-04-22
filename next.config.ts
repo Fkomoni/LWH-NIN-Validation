@@ -26,10 +26,26 @@ const csp = [
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  // Emit a self-contained deployment bundle at `.next/standalone/`.
+  // IT can drop that directory onto Azure App Service and start the
+  // server with `node server.js` — no `pnpm install` or source-tree
+  // build step required on the target.
+  output: "standalone",
   experimental: {
     typedRoutes: true,
   },
   serverExternalPackages: ["msw", "@mswjs/interceptors"],
+  // The standalone file tracer can't follow MSW's dynamic subpath
+  // exports (we load `msw/node` via a computed specifier on purpose).
+  // Force-include it so the standalone bundle can boot even though the
+  // code path is a no-op in production (NEXT_PUBLIC_MOCKS_ENABLED=false).
+  outputFileTracingIncludes: {
+    "*": [
+      "./node_modules/msw/**",
+      "./node_modules/@mswjs/**",
+      "./node_modules/@bundled-es-modules/**",
+    ],
+  },
   async headers() {
     return [
       {
