@@ -1,0 +1,22 @@
+node_modules/
+.next/
+out/
+dist/
+coverage/
+playwright-report/
+test-results/
+*.log
+.DS_Store
+.env
+.env.local
+.env.*.local
+!.env.example
+.vercel
+.tsbuildinfo
+tsconfig.tsbuildinfo
+next-env.d.ts
+
+# Prisma
+node_modules/.prisma/
+src/generated/prisma/
+prisma/migrations/dev.db*

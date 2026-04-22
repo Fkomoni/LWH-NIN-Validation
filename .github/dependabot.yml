@@ -1,0 +1,42 @@
+# Dependabot configuration for LWH NIN Verification.
+#
+# - npm: weekly pnpm ecosystem updates; minor/patch grouped into one PR
+#   per week to keep review load sane. Major bumps come in individually.
+# - github-actions: monthly pin-refresh for workflow actions.
+#
+# Security advisories are raised as separate PRs outside these windows,
+# so a critical CVE doesn't wait for the weekly slot.
+
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:00"
+      timezone: Africa/Lagos
+    open-pull-requests-limit: 8
+    labels:
+      - dependencies
+    groups:
+      patch-minor:
+        applies-to: version-updates
+        update-types:
+          - patch
+          - minor
+    ignore:
+      # Pin Next.js to the 15.x line until we intentionally plan the 16.x
+      # migration; Dependabot may still open MAJOR upgrade PRs but won't
+      # bundle them into the grouped weekly one.
+      - dependency-name: next
+        update-types:
+          - version-update:semver-major
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    labels:
+      - dependencies
+      - ci

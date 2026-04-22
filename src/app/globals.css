@@ -1,0 +1,102 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Brand + semantic tokens.
+ *
+ * Source of truth for *brand* values: docs/brand/tokens.md (extracted from the
+ * Leadway Health Mini Manual, 2021-02-24). Values flagged "NOT IN PDF — ASK"
+ * in that document use reasoned defaults tagged TODO(brand) — revisit once
+ * the client confirms.
+ *
+ * Colours here use HSL triplets for Tailwind's `hsl(var(--x))` pattern.
+ */
+
+@layer base {
+  :root {
+    /* Brand primaries (from Mini Manual) */
+    --brand-orange: 15 88% 54%;     /* #F15A24 */
+    --brand-red: 350 81% 44%;       /* #C61531 */
+    --brand-charcoal: 0 0% 15%;     /* #262626 */
+
+    /* Brand supporting (from Mini Manual) */
+    --brand-yellow: 56 97% 56%;     /* #FCEE21 */
+    --brand-grey: 0 0% 50%;         /* #808080 */
+    --brand-grey-light: 0 0% 90%;   /* #E6E6E6 */
+    --brand-navy: 244 71% 24%;      /* #1B1464 */
+    --brand-sky: 199 76% 52%;       /* #29ABE2 */
+
+    /* Semantic surface */
+    --background: 0 0% 100%;
+    --foreground: 0 0% 15%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 15%;
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 40%;
+    --border: 0 0% 90%;
+    --input: 0 0% 90%;
+    --ring: 350 81% 44%;
+
+    /* Primary CTA — confirmed Leadway Red */
+    --primary: 350 81% 44%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Secondary — charcoal */
+    --secondary: 0 0% 15%;
+    --secondary-foreground: 0 0% 100%;
+
+    /* TODO(brand): client to confirm semantic palette. */
+    --destructive: 350 81% 44%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 148 58% 35%;
+    --success-foreground: 0 0% 100%;
+    --warning: 15 88% 54%;
+    --warning-foreground: 0 0% 100%;
+    --info: 199 76% 52%;
+    --info-foreground: 0 0% 100%;
+    --accent: 0 0% 96%;
+    --accent-foreground: 0 0% 15%;
+
+    /* Font fallback confirmed Inter while Leadway webfont is not licensed. */
+    --font-sans: var(--font-inter), system-ui, -apple-system, "Segoe UI",
+      Roboto, Arial, sans-serif;
+  }
+
+  html,
+  body {
+    color: hsl(var(--foreground));
+    background: hsl(var(--background));
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+}
+
+/* Respect reduced motion users. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Skip-link for keyboard users. */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+}
+.skip-link:focus {
+  left: 1rem;
+  top: 1rem;
+  z-index: 100;
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+}
