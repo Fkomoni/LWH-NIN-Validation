@@ -5,12 +5,14 @@ import { audit } from "./audit";
 import { traceId } from "@/lib/ids";
 
 /**
- * Per-enrolleeId failure counter + 48 h hard lock.
+ * Per-enrolleeId, per-channel failure counter + 48 h hard lock.
  *
  * Policy (client-confirmed):
- *   - 3 failed auth attempts → 48 h hard lock, no IP conditional.
- *   - When a locked member returns to /auth we surface a live
- *     countdown of hours remaining.
+ *   - DOB channel: 2 wrong attempts → auto-route to /verify (NIN path).
+ *     The 3rd would lock, but in normal use the auto-route fires first.
+ *   - NIN channel: 3 wrong attempts → 48 h hard lock.
+ *   - The hard lock is global per-enrollee: once set, both channels are
+ *     blocked for 48 h regardless of which one tipped it.
  *
  * Note on DoS risk: because lockout is keyed only on enrolleeId, an
  * attacker who knows a target's Enrollee ID can cause a 48 h DoS with
@@ -27,8 +29,8 @@ interface HardLock {
   ip: string;
 }
 
-function failKey(enrolleeId: string) {
-  return `lock:fail:${enrolleeId}`;
+function failKey(enrolleeId: string, channel: Channel) {
+  return `lock:fail:${channel}:${enrolleeId}`;
 }
 function hardKey(enrolleeId: string) {
   return `lock:hard:${enrolleeId}`;
@@ -38,6 +40,14 @@ function ipFailKey(ip: string) {
 }
 function ipSoftKey(ip: string) {
   return `lock:ipsoft:${ip}`;
+}
+
+async function delAllFailCounters(kv: ReturnType<typeof getKv>, enrolleeId: string) {
+  await Promise.all([
+    kv.del(failKey(enrolleeId, "DOB")),
+    kv.del(failKey(enrolleeId, "PRINCIPAL_NIN")),
+    kv.del(failKey(enrolleeId, "OTP")),
+  ]);
 }
 
 export async function isLocked(enrolleeId: string): Promise<boolean> {
@@ -104,7 +114,7 @@ export async function recordFail({
 }: RecordFailArgs): Promise<FailOutcome> {
   const kv = getKv();
   const windowMs = appConfig.lockout.windowMs;
-  const count = await kv.pushWindow(failKey(enrolleeId), windowMs);
+  const count = await kv.pushWindow(failKey(enrolleeId, channel), windowMs);
 
   const locked = count >= appConfig.lockout.maxFailuresPerWindow;
   if (!locked) return { locked: false, attemptsInWindow: count };
@@ -132,25 +142,24 @@ export async function recordFail({
 
 export async function clearFailures(enrolleeId: string): Promise<void> {
   const kv = getKv();
-  // Also purge any per-IP tuple buckets that might linger.
-  await kv.del(failKey(enrolleeId));
+  await delAllFailCounters(kv, enrolleeId);
 }
 
 /**
- * Wipe both the hard lock and the failure counter for an enrollee.
- * Called by the NIN-fallback path when a member proves their identity
- * by matching NIMC's DOB against Prognosis's DOB.
+ * Wipe both the hard lock and every channel's failure counter for an
+ * enrollee. Called by the NIN-fallback path when a member proves their
+ * identity by matching NIMC's DOB against Prognosis's DOB.
  */
 export async function clearLockout(enrolleeId: string): Promise<void> {
   const kv = getKv();
   await kv.del(hardKey(enrolleeId));
-  await kv.del(failKey(enrolleeId));
+  await delAllFailCounters(kv, enrolleeId);
 }
 
 export async function adminUnlock(enrolleeId: string, adminId: string): Promise<void> {
   const kv = getKv();
   await kv.del(hardKey(enrolleeId));
-  await kv.del(failKey(enrolleeId));
+  await delAllFailCounters(kv, enrolleeId);
   await audit({
     action: "admin.unlock",
     actorType: "admin",
@@ -163,7 +172,7 @@ export async function adminUnlock(enrolleeId: string, adminId: string): Promise<
 /**
  * Full per-enrollee state reset. Used by the Ops console to let a
  * tester retry without waiting for an hour / 48 h. Clears:
- *   - hard lock + failure counter (same as adminUnlock)
+ *   - hard lock + all channel failure counters
  *   - NIN-validate rate-limit counter
  *   - OTP code, cooldown, resend counter
  *
@@ -173,7 +182,7 @@ export async function adminUnlock(enrolleeId: string, adminId: string): Promise<
 export async function adminResetMember(enrolleeId: string, adminId: string): Promise<void> {
   const kv = getKv();
   await kv.del(hardKey(enrolleeId));
-  await kv.del(failKey(enrolleeId));
+  await delAllFailCounters(kv, enrolleeId);
   await kv.del(`rl:nin:enr:${enrolleeId}`);
   await kv.del(`otp:code:${enrolleeId}`);
   await kv.del(`otp:cooldown:${enrolleeId}`);
