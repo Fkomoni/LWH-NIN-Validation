@@ -1,5 +1,5 @@
 import type { MemberService, MemberLookupResult } from "../types";
-import { households, validPrincipalNins } from "@/fixtures/households";
+import { households, validPrincipalNins, phoneToEnrolleeId } from "@/fixtures/households";
 import { dobMatches } from "@/lib/validation/dob";
 
 /**
@@ -20,6 +20,26 @@ export const mockMemberService: MemberService = {
         ok: false,
         reason: "DOB_MISMATCH",
         memberFullName: hh.principal.fullName,
+      };
+    }
+    return { ok: true, household: hh };
+  },
+
+  async authenticateByPhone({ phone, dob }): Promise<MemberLookupResult> {
+    // Normalize to local format for fixture lookup
+    const normalized = phone.replace(/[\s\-().+]/g, "").replace(/^234/, "0");
+    const enrolleeId = phoneToEnrolleeId[normalized];
+    if (!enrolleeId) return { ok: false, reason: "NOT_FOUND" };
+    if (enrolleeId === "LWH-0006") return { ok: false, reason: "LOCKED", resolvedEnrolleeId: enrolleeId };
+
+    const hh = households[enrolleeId];
+    if (!hh) return { ok: false, reason: "NOT_FOUND" };
+    if (!dobMatches(hh.principal.dob, dob)) {
+      return {
+        ok: false,
+        reason: "DOB_MISMATCH",
+        memberFullName: hh.principal.fullName,
+        resolvedEnrolleeId: enrolleeId,
       };
     }
     return { ok: true, household: hh };

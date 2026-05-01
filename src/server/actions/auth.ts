@@ -3,7 +3,8 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { after } from "next/server";
-import { authStartSchema, principalNinSchema } from "@/schemas/auth";
+import { authStartSchema, authStartPhoneSchema, principalNinSchema } from "@/schemas/auth";
+import type { MemberLookupResult } from "@/services/types";
 import { getServices } from "@/services";
 import type { PrognosisUpdatePayload } from "@/services/types";
 import { setSession } from "@/server/session";
@@ -30,7 +31,9 @@ export type AuthStartState =
   | { status: "error"; message: string; fieldErrors?: Record<string, string> }
   | {
       status: "dob-mismatch";
-      enrolleeId: string;
+      /** Undefined when the member was looked up by phone and the enrolleeId
+       *  could not be resolved (edge case). The verify link is hidden then. */
+      enrolleeId?: string;
       /** Fully-formed "Enrollee with Firxxx Surxxx … does not match our
        *  records." — composed server-side with a masked name + the
        *  DOB the user typed formatted dd/mm/yyyy. */
@@ -79,81 +82,116 @@ export async function authStart(
     return { status: "rate-limited" };
   }
 
-  const parsed = authStartSchema.safeParse({
-    enrolleeId: formData.get("enrolleeId"),
-    dob: formData.get("dob"),
-    consent: formData.get("consent") === "on",
-  });
-  if (!parsed.success) {
-    // Count schema rejects against the IP (not the enrollee) so
-    // scripted probes that never pass validation still arm the IP
-    // soft-lock. Legit user typos don't touch the per-enrollee counter
-    // — only a complete, real failed attempt does.
-    await recordIpFail(ip);
-    return {
-      status: "error",
-      message: "Please check the highlighted fields.",
-      fieldErrors: fieldErrorsFrom(parsed.error.issues),
-    };
-  }
+  const loginMethod = formData.get("loginMethod") === "phone" ? "phone" : "enrolleeId";
+  const consentOn = formData.get("consent") === "on";
 
-  const ipLimit = await rateLimit.authIp(ip);
-  if (!ipLimit.ok) {
-    await audit({ action: "auth.ratelimit.ip", actorType: "system", traceId: tid, ip });
-    return { status: "rate-limited" };
-  }
-
-  if (await isLocked(parsed.data.enrolleeId)) {
-    const expiresAt = (await getLockExpiry(parsed.data.enrolleeId)) ?? Date.now();
-    return { status: "locked", expiresAt };
-  }
+  // Parse with the appropriate schema based on which method the user chose.
+  let enrolleeId: string;
+  let dob: string;
+  let result: MemberLookupResult;
 
   const svc = getServices();
-  const result = await svc.member.authenticateByDob({ ...parsed.data, ip, userAgent: ua });
+
+  if (loginMethod === "phone") {
+    const parsed = authStartPhoneSchema.safeParse({
+      phone: formData.get("phone"),
+      dob: formData.get("dob"),
+      consent: consentOn,
+    });
+    if (!parsed.success) {
+      await recordIpFail(ip);
+      return {
+        status: "error",
+        message: "Please check the highlighted fields.",
+        fieldErrors: fieldErrorsFrom(parsed.error.issues),
+      };
+    }
+
+    const ipLimit = await rateLimit.authIp(ip);
+    if (!ipLimit.ok) {
+      await audit({ action: "auth.ratelimit.ip", actorType: "system", traceId: tid, ip });
+      return { status: "rate-limited" };
+    }
+
+    dob = parsed.data.dob;
+    result = await svc.member.authenticateByPhone({ phone: parsed.data.phone, dob, ip, userAgent: ua });
+    // enrolleeId resolved from the phone lookup result (available on mismatch/locked).
+    enrolleeId =
+      result.ok
+        ? result.household.principal.enrolleeId
+        : (result.reason === "DOB_MISMATCH" || result.reason === "LOCKED")
+          ? (result.resolvedEnrolleeId ?? "")
+          : "";
+  } else {
+    const parsed = authStartSchema.safeParse({
+      enrolleeId: formData.get("enrolleeId"),
+      dob: formData.get("dob"),
+      consent: consentOn,
+    });
+    if (!parsed.success) {
+      await recordIpFail(ip);
+      return {
+        status: "error",
+        message: "Please check the highlighted fields.",
+        fieldErrors: fieldErrorsFrom(parsed.error.issues),
+      };
+    }
+
+    const ipLimit = await rateLimit.authIp(ip);
+    if (!ipLimit.ok) {
+      await audit({ action: "auth.ratelimit.ip", actorType: "system", traceId: tid, ip });
+      return { status: "rate-limited" };
+    }
+
+    enrolleeId = parsed.data.enrolleeId;
+    dob = parsed.data.dob;
+
+    if (await isLocked(enrolleeId)) {
+      const expiresAt = (await getLockExpiry(enrolleeId)) ?? Date.now();
+      return { status: "locked", expiresAt };
+    }
+
+    result = await svc.member.authenticateByDob({ enrolleeId, dob, ip, userAgent: ua });
+  }
 
   if (!result.ok && (result.reason === "DOB_MISMATCH" || result.reason === "NOT_FOUND")) {
-    const outcome = await recordFail({ enrolleeId: parsed.data.enrolleeId, channel: "DOB", ip, userAgent: ua });
+    const lockoutEnrolleeId = enrolleeId || "unknown";
+    const outcome = await recordFail({ enrolleeId: lockoutEnrolleeId, channel: "DOB", ip, userAgent: ua });
     await recordIpFail(ip);
     await audit({
       action: `auth.dob.${result.reason === "NOT_FOUND" ? "not_found" : "mismatch"}`,
       actorType: "portal-user",
-      actorId: parsed.data.enrolleeId,
+      actorId: lockoutEnrolleeId,
       traceId: tid,
       ip,
     });
     if (outcome.locked) {
       await notifyLockout({
-        enrolleeId: parsed.data.enrolleeId,
+        enrolleeId: lockoutEnrolleeId,
         channel: "DOB",
         attempts: outcome.attemptsInWindow,
         ip,
         userAgent: ua,
       });
       const expiresAt =
-        outcome.expiresAt ?? (await getLockExpiry(parsed.data.enrolleeId)) ?? Date.now();
+        outcome.expiresAt ?? (await getLockExpiry(lockoutEnrolleeId)) ?? Date.now();
       return { status: "locked", expiresAt };
     }
-    // DOB_MISMATCH carries the real member's full name so the UI can
-    // partially mask it and confirm with the user that we are
-    // matching against the right record. NOT_FOUND has no name
-    // (enrollee doesn't exist), so the composed message falls back
-    // to a generic masked form.
-    const fullName =
-      !result.ok && result.reason === "DOB_MISMATCH" ? result.memberFullName : undefined;
+    const fullName = result.reason === "DOB_MISMATCH" ? result.memberFullName : undefined;
     const attemptsRemaining = Math.max(
       0,
       appConfig.lockout.maxFailuresPerWindow - outcome.attemptsInWindow,
     );
     return {
       status: "dob-mismatch",
-      enrolleeId: parsed.data.enrolleeId,
-      message: composeDobMismatchMessage(fullName, parsed.data.dob),
+      enrolleeId: enrolleeId || undefined,
+      message: composeDobMismatchMessage(fullName, dob),
       attemptsRemaining,
     };
   }
 
   if (!result.ok && result.reason === "LOCKED") {
-    const expiresAt = (await getLockExpiry(parsed.data.enrolleeId)) ?? Date.now();
+    const expiresAt = (await getLockExpiry(enrolleeId)) ?? Date.now();
     return { status: "locked", expiresAt };
   }
   if (!result.ok) {
@@ -163,21 +201,21 @@ export async function authStart(
     };
   }
 
-  await clearFailures(parsed.data.enrolleeId);
+  await clearFailures(enrolleeId);
   {
     const now = new Date().toISOString();
     await setSession({
-      enrolleeId: parsed.data.enrolleeId,
+      enrolleeId,
       authedAt: now,
       lastSeenAt: now,
-      channel: "DOB",
+      channel: loginMethod === "phone" ? "PHONE" : "DOB",
       mocked: appConfig.mocksEnabled,
     });
   }
   await audit({
-    action: "auth.dob.success",
+    action: loginMethod === "phone" ? "auth.phone.success" : "auth.dob.success",
     actorType: "portal-user",
-    actorId: parsed.data.enrolleeId,
+    actorId: enrolleeId,
     traceId: tid,
     ip,
   });

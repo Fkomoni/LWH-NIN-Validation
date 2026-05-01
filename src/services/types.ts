@@ -4,19 +4,37 @@ import type { AuthSession, Household, NinValidationResult } from "@/types/domain
 
 export type MemberLookupResult =
   | { ok: true; household: Household }
-  | { ok: false; reason: "NOT_FOUND" | "LOCKED" | "PROVIDER_ERROR" }
+  | { ok: false; reason: "NOT_FOUND" | "PROVIDER_ERROR" }
+  | {
+      ok: false;
+      reason: "LOCKED";
+      /** Populated when the enrolleeId was resolved from a phone lookup. */
+      resolvedEnrolleeId?: string;
+    }
   | {
       ok: false;
       reason: "DOB_MISMATCH";
       /** Full name of the matched enrollee, for partial masking in the
        *  error screen. Absent when the enrollee does not exist. */
       memberFullName?: string;
+      /** Populated when the enrolleeId was resolved from a phone lookup,
+       *  so the lockout counter and /verify link can use it. */
+      resolvedEnrolleeId?: string;
     };
 
 export interface MemberService {
   /** Lookup by enrolleeId + DOB. Returns household on match. */
   authenticateByDob(input: {
     enrolleeId: string;
+    dob: string;
+    ip: string;
+    userAgent: string;
+  }): Promise<MemberLookupResult>;
+
+  /** Lookup by phone number + DOB. Resolves the enrolleeId via Prognosis
+   *  phone lookup, then falls through to the same DOB check. */
+  authenticateByPhone(input: {
+    phone: string;
     dob: string;
     ip: string;
     userAgent: string;

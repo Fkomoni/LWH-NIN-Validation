@@ -3,6 +3,7 @@ import type { MemberService, MemberLookupResult } from "../types";
 import type { Household, Person, Relationship } from "@/types/domain";
 import {
   getEnrolleeBioData,
+  getEnrolleeBioDataByPhone,
   getEnrolleeDependants,
   PrognosisProviderError,
   type PrognosisMember,
@@ -128,6 +129,45 @@ export const realMemberService: MemberService = {
         memberFullName: res.household.principal.fullName,
       };
     }
+    return { ok: true, household: res.household };
+  },
+
+  async authenticateByPhone({ phone, dob }): Promise<MemberLookupResult> {
+    let principal: PrognosisMember | null;
+    try {
+      principal = await getEnrolleeBioDataByPhone(phone);
+    } catch (err) {
+      if (err instanceof PrognosisProviderError) {
+        log.error({ err: err.message, status: err.status }, "member.phone.provider-error");
+        return { ok: false, reason: "PROVIDER_ERROR" };
+      }
+      log.error({ err: String(err) }, "member.phone.unexpected");
+      return { ok: false, reason: "PROVIDER_ERROR" };
+    }
+
+    if (!principal) return { ok: false, reason: "NOT_FOUND" };
+
+    const resolvedEnrolleeId = principal.enrolleeId;
+
+    if (await isLocked(resolvedEnrolleeId)) {
+      return { ok: false, reason: "LOCKED", resolvedEnrolleeId };
+    }
+
+    const matched = principal.dob ? dobMatches(principal.dob, dob) : false;
+    log.info({ enrolleeId: resolvedEnrolleeId, matched }, "auth.phone.dob.compare");
+
+    if (!matched) {
+      return {
+        ok: false,
+        reason: "DOB_MISMATCH",
+        memberFullName: principal.fullName,
+        resolvedEnrolleeId,
+      };
+    }
+
+    // DOB matched — reload with full household (dependants + per-member NIN fields).
+    const res = await loadHouseholdRaw(resolvedEnrolleeId);
+    if (res.kind !== "ok") return { ok: false, reason: "PROVIDER_ERROR" };
     return { ok: true, household: res.household };
   },
 

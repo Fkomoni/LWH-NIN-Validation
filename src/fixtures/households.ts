@@ -25,6 +25,15 @@ function p(partial: Partial<Person> & Pick<Person, "id" | "enrolleeId" | "fullNa
   };
 }
 
+/** Phone number → enrolleeId map for mock phone-based login.
+ *  Use these numbers in dev/test to exercise the phone path. */
+export const phoneToEnrolleeId: Record<string, string> = {
+  "08012340001": "LWH-0001",
+  "08012340002": "LWH-0002",
+  "08012340007": "LWH-0007",
+  "08012340006": "LWH-0006", // always-locked account
+};
+
 export const households: Record<string, Household> = {
   "LWH-0001": {
     principal: p({

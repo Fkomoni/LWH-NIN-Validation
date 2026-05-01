@@ -232,6 +232,67 @@ export async function getEnrolleeBioData(enrolleeId: string): Promise<PrognosisM
   return member;
 }
 
+/**
+ * Normalise a Nigerian mobile number to the local 11-digit format
+ * (08XXXXXXXXX) that Prognosis stores in Member_Phone_* fields.
+ *
+ * Accepts: 08090700956 · 8090700956 · 2348090700956 · +2348090700956
+ *          080 9070 0956 (with spaces) — any combination of the above.
+ */
+function normalizePhone(raw: string): string {
+  const s = raw.replace(/[\s\-().+]/g, "");
+  // +2348090700956 or 2348090700956 → 08090700956
+  if (/^234\d{10}$/.test(s)) return "0" + s.slice(3);
+  // 8090700956 (10 digits, no leading 0) → 08090700956
+  if (/^[7-9][01]\d{8}$/.test(s)) return "0" + s;
+  return s;
+}
+
+/**
+ * Look up a member by mobile number.
+ *
+ * Endpoint: GET {BASE}/EnrolleeProfile/GetEnrolleeBioDataByMobileNo?mobileno={phone}
+ *
+ * Returns the first matching record, or null on 404 / empty body.
+ * Throws PrognosisProviderError on auth / server failures.
+ */
+export async function getEnrolleeBioDataByPhone(rawPhone: string): Promise<PrognosisMember | null> {
+  const base = process.env.PROGNOSIS_BASE_URL;
+  if (!base) throw new PrognosisProviderError("prognosis.missing-base-url");
+
+  const phone = normalizePhone(rawPhone);
+  const url = `${base}/EnrolleeProfile/GetEnrolleeBioDataByMobileNo?mobileno=${encodeURIComponent(phone)}`;
+
+  let status: number;
+  let body: unknown;
+  try {
+    ({ status, body } = await authedGet(url));
+  } catch (err) {
+    log.error({ err: String(err) }, "prognosis.phone.network-fail");
+    throw new PrognosisProviderError(String(err));
+  }
+
+  log.info(
+    { path: "/EnrolleeProfile/GetEnrolleeBioDataByMobileNo", status, keys: bodyKeys(body) },
+    "prognosis.phone.response",
+  );
+
+  if (status === 401 || status === 403) throw new PrognosisProviderError(`prognosis.phone.auth-${status}`, status);
+  if (status >= 500) throw new PrognosisProviderError(`prognosis.phone.http-${status}`, status);
+  if (status === 404) return null;
+  if (status >= 400) throw new PrognosisProviderError(`prognosis.phone.http-${status}`, status);
+
+  const unwrapped = unwrap(body);
+  const one = Array.isArray(unwrapped) ? unwrapped[0] : unwrapped;
+  if (!one) return null;
+
+  const member = mapMember(one, "");
+  if (!member) {
+    log.warn({ keys: Object.keys(one) }, "prognosis.phone.unrecognised-shape");
+  }
+  return member;
+}
+
 export async function getEnrolleeDependants(enrolleeId: string): Promise<PrognosisMember[]> {
   const base = process.env.PROGNOSIS_BASE_URL;
   if (!base) throw new PrognosisProviderError("prognosis.missing-base-url");

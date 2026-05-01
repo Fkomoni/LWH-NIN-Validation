@@ -58,6 +58,6 @@ export interface AuthSession {
   authedAt: string;
   /** Wall-clock of the last authenticated request (bounds idleMs). */
   lastSeenAt: string;
-  channel: "DOB" | "PRINCIPAL_NIN" | "OTP";
+  channel: "DOB" | "PHONE" | "PRINCIPAL_NIN" | "OTP";
   mocked?: boolean;
 }

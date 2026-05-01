@@ -23,15 +23,39 @@ export const dobSchema = z
   .refine(isIsoDate, "Please enter a valid date.")
   .refine((v) => isPlausibleDob(v, 0, 120), "That date doesn't look right.");
 
+/**
+ * Nigerian mobile number — accepts all common formats:
+ *   08090700956  ·  8090700956  ·  2348090700956  ·  +2348090700956
+ *   080 9070 0956 (spaces stripped before validation)
+ */
+export const phoneSchema = z
+  .string({ required_error: "Please enter your phone number." })
+  .trim()
+  .transform((v) => v.replace(/[\s\-().]/g, ""))
+  .refine(
+    (v) => /^(\+?234[7-9][01]\d{8}|0[7-9][01]\d{8}|[7-9][01]\d{8})$/.test(v),
+    "Please enter a valid Nigerian mobile number (e.g. 08090700956).",
+  );
+
+const consentField = z.literal(true, {
+  errorMap: () => ({ message: "You must accept the consent notice to continue." }),
+});
+
 export const authStartSchema = z.object({
   enrolleeId: enrolleeIdSchema,
   dob: dobSchema,
-  consent: z.literal(true, {
-    errorMap: () => ({ message: "You must accept the consent notice to continue." }),
-  }),
-  turnstileToken: z.string().optional(), // wired in Phase 2
+  consent: consentField,
+  turnstileToken: z.string().optional(),
 });
 export type AuthStartInput = z.infer<typeof authStartSchema>;
+
+export const authStartPhoneSchema = z.object({
+  phone: phoneSchema,
+  dob: dobSchema,
+  consent: consentField,
+  turnstileToken: z.string().optional(),
+});
+export type AuthStartPhoneInput = z.infer<typeof authStartPhoneSchema>;
 
 export const principalNinSchema = z.object({
   enrolleeId: enrolleeIdSchema,
