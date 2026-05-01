@@ -23,6 +23,7 @@ import {
 import { notifyLockout } from "@/server/notify";
 import { enqueuePrognosis } from "@/server/outbox";
 import { notifyNinValidated } from "@/server/notify";
+import { updateEnrolleeDob } from "@/services/http/PrognosisMemberClient";
 import { appConfig } from "@/config/app";
 import { composeDobMismatchMessage } from "@/lib/displayName";
 
@@ -176,6 +177,12 @@ export async function authStart(
       const expiresAt =
         outcome.expiresAt ?? (await getLockExpiry(lockoutEnrolleeId)) ?? Date.now();
       return { status: "locked", expiresAt };
+    }
+    // After 2 wrong DOB attempts, stop asking for DOB and route the
+    // member to the NIN verification path automatically. They retain
+    // 1 attempt there before the full hard-lock fires.
+    if (outcome.attemptsInWindow >= 2 && enrolleeId) {
+      redirect(`/verify?enrolleeId=${encodeURIComponent(enrolleeId)}`);
     }
     const fullName = result.reason === "DOB_MISMATCH" ? result.memberFullName : undefined;
     const attemptsRemaining = Math.max(
@@ -365,6 +372,7 @@ export async function authByPrincipalNin(
     };
     await enqueuePrognosis(payload);
     after(async () => {
+      // Write the NIN to Prognosis.
       try {
         const write = await svc.prognosis.upsertMemberNin(payload);
         await audit({
@@ -382,6 +390,23 @@ export async function authByPrincipalNin(
         }
       } catch {
         /* outbox drain will retry */
+      }
+
+      // Update the member's DOB on Prognosis to the NIMC-verified value.
+      // This corrects a stored DOB that was wrong (the reason they failed
+      // the DOB path and ended up here via NIN verification).
+      if (verify.dobFromNin) {
+        try {
+          const dobResult = await updateEnrolleeDob(principal.id, verify.dobFromNin);
+          await audit({
+            action: `prognosis.dob.update.${dobResult.ok ? "ok" : "fail"}`,
+            actorType: "system",
+            memberId: principal.id,
+            traceId: tid,
+          });
+        } catch {
+          /* non-fatal — member is authenticated; DOB correction can be retried */
+        }
       }
     });
   }

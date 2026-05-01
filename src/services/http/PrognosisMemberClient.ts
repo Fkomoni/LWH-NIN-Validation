@@ -293,6 +293,49 @@ export async function getEnrolleeBioDataByPhone(rawPhone: string): Promise<Progn
   return member;
 }
 
+/**
+ * Update an enrollee's date of birth on Prognosis.
+ *
+ * Endpoint: POST {BASE}/EnrolleeProfile/UpdateBiodata
+ * Only the DOB field is written — all other biodata fields are left untouched.
+ *
+ * Called automatically after a successful NIN-path authentication so that
+ * a member whose stored DOB was wrong is corrected to the NIMC-verified value.
+ */
+export async function updateEnrolleeDob(
+  enrolleeId: string,
+  dobIso: string,
+): Promise<{ ok: boolean; status?: number }> {
+  const base = process.env.PROGNOSIS_BASE_URL;
+  if (!base) return { ok: false };
+
+  let token: string;
+  try {
+    token = await getPrognosisToken();
+  } catch (err) {
+    log.error({ err: String(err), enrolleeId }, "prognosis.dob.token-fail");
+    return { ok: false };
+  }
+
+  const headers = new Headers();
+  headers.set("accept", "application/json");
+  headers.set("content-type", "application/json");
+  headers.set("Authorization", `Bearer ${token}`);
+
+  const res = await fetch(`${base}/EnrolleeProfile/UpdateBiodata`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ EnrolleeID: enrolleeId, DateOfBirth: dobIso }),
+  });
+
+  log.info(
+    { path: "/EnrolleeProfile/UpdateBiodata", status: res.status, enrolleeId },
+    "prognosis.dob.update",
+  );
+
+  return { ok: res.ok, status: res.status };
+}
+
 export async function getEnrolleeDependants(enrolleeId: string): Promise<PrognosisMember[]> {
   const base = process.env.PROGNOSIS_BASE_URL;
   if (!base) throw new PrognosisProviderError("prognosis.missing-base-url");
