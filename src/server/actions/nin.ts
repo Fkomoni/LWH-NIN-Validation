@@ -12,6 +12,7 @@ import { maskNin } from "@/lib/mask";
 import { rateLimit } from "@/server/rateLimit";
 import { enqueuePrognosis } from "@/server/outbox";
 import { notifyNinValidated } from "@/server/notify";
+import { updateEnrolleeDob } from "@/services/http/PrognosisMemberClient";
 import { log } from "@/lib/logger";
 import type { NinValidationResult } from "@/types/domain";
 
@@ -104,9 +105,6 @@ export async function submitBeneficiaryNin(input: unknown): Promise<NinSubmitRes
           traceId: tid,
           payload: { txnRef: ref },
         });
-        // Fire the receipt email ONLY after a successful write. The
-        // email goes to the principal (the authenticated user) and
-        // names the specific beneficiary whose NIN was updated.
         if (write.ok && result.verifiedFullName) {
           await notifyNinValidated({
             principalEnrolleeId: session.enrolleeId,
@@ -115,6 +113,23 @@ export async function submitBeneficiaryNin(input: unknown): Promise<NinSubmitRes
         }
       } catch (err) {
         log.error({ err: String(err), txnRef: ref }, "after.prognosis.write.fail");
+      }
+
+      // Update the dependant's DOB on Prognosis to the NIMC-verified
+      // value. Runs only when the NIN write succeeded — we use the same
+      // dobFromNin that was already validated by NIMC a moment ago.
+      if (result.dobFromNin) {
+        try {
+          const dobResult = await updateEnrolleeDob(parsed.beneficiaryId, result.dobFromNin);
+          await audit({
+            action: `prognosis.dob.update.${dobResult.ok ? "ok" : "fail"}`,
+            actorType: "system",
+            memberId: parsed.beneficiaryId,
+            traceId: tid,
+          });
+        } catch (err) {
+          log.error({ err: String(err) }, "after.prognosis.dob.fail");
+        }
       }
     });
   }
