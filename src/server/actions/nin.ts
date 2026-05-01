@@ -13,6 +13,7 @@ import { rateLimit } from "@/server/rateLimit";
 import { enqueuePrognosis } from "@/server/outbox";
 import { notifyNinValidated } from "@/server/notify";
 import { updateEnrolleeDob } from "@/services/http/PrognosisMemberClient";
+import { recordNinSuccess, recordDobUpdateSuccess } from "@/server/stats";
 import { log } from "@/lib/logger";
 import type { NinValidationResult } from "@/types/domain";
 
@@ -105,11 +106,14 @@ export async function submitBeneficiaryNin(input: unknown): Promise<NinSubmitRes
           traceId: tid,
           payload: { txnRef: ref },
         });
-        if (write.ok && result.verifiedFullName) {
-          await notifyNinValidated({
-            principalEnrolleeId: session.enrolleeId,
-            beneficiaryName: result.verifiedFullName,
-          }).catch(() => undefined);
+        if (write.ok) {
+          await recordNinSuccess();
+          if (result.verifiedFullName) {
+            await notifyNinValidated({
+              principalEnrolleeId: session.enrolleeId,
+              beneficiaryName: result.verifiedFullName,
+            }).catch(() => undefined);
+          }
         }
       } catch (err) {
         log.error({ err: String(err), txnRef: ref }, "after.prognosis.write.fail");
@@ -127,6 +131,7 @@ export async function submitBeneficiaryNin(input: unknown): Promise<NinSubmitRes
             memberId: parsed.beneficiaryId,
             traceId: tid,
           });
+          if (dobResult.ok) await recordDobUpdateSuccess();
         } catch (err) {
           log.error({ err: String(err) }, "after.prognosis.dob.fail");
         }

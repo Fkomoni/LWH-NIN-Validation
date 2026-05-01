@@ -1,95 +1,126 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { PageShell } from "@/components/layout/PageShell";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import { getAdminSession } from "@/server/admin/session";
+import { adminLogout } from "@/server/actions/admin";
+import { getPortalStats } from "@/server/stats";
 
 export const metadata = { title: "Admin — Leadway Health" };
 
 /**
- * Admin console landing — Phase 4 destination. Real role-gating + search +
- * manual-review queue + unlock + CSV export land in Phase 4. This page
- * exists today so the routing and layout are ready.
+ * Admin landing — live stats + links to the other ops tools.
+ * Gated by the admin session cookie; unauthenticated requests are
+ * redirected to /admin/login.
  */
-export default function AdminLandingPage() {
+export default async function AdminLandingPage() {
+  const admin = await getAdminSession();
+  if (!admin) redirect("/admin/login");
+
+  const stats = await getPortalStats();
+
   return (
     <PageShell>
       <div className="space-y-6">
-        <div className="space-y-1">
-          <p className="text-xs font-semibold uppercase tracking-wide text-primary">
-            Internal tools
-          </p>
-          <h1 className="text-2xl font-bold">Ops console</h1>
-          <p className="text-sm text-muted-foreground">
-            Search enrollees, triage manual reviews, unlock accounts, export reports.
-          </p>
-          <div className="pt-2">
-            <Button asChild>
-              <Link href="/admin/login">Sign in</Link>
-            </Button>
+        <div className="flex items-start justify-between gap-3">
+          <div className="space-y-1">
+            <p className="text-xs font-semibold uppercase tracking-wide text-primary">
+              Internal tools
+            </p>
+            <h1 className="text-2xl font-bold">Ops console</h1>
+            <p className="text-sm text-muted-foreground">
+              Signed in as <span className="font-mono">{admin.email}</span> ({admin.role}).
+            </p>
           </div>
+          <form action={adminLogout}>
+            <Button type="submit" variant="outline" size="sm">
+              Sign out
+            </Button>
+          </form>
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">
           <Card>
             <CardHeader>
-              <CardTitle>Manual review queue</CardTitle>
+              <CardTitle>NIN updates on Prognosis</CardTitle>
               <CardDescription>
-                NIN submissions with a 0.80–0.92 name score land here.
+                Successful writes to <code>upsertMemberNin</code>.
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted-foreground">
-                Lands in Phase 4. The schema for this table (model
-                <code className="mx-1 rounded bg-muted px-1 py-0.5 text-xs">ManualReview</code>)
-                is already in <code>prisma/schema.prisma</code>.
-              </p>
+            <CardContent className="flex items-baseline gap-6">
+              <div>
+                <p className="text-3xl font-bold tabular-nums">{stats.ninTotal.toLocaleString()}</p>
+                <p className="text-xs text-muted-foreground">All time</p>
+              </div>
+              <div>
+                <p className="text-2xl font-semibold tabular-nums">{stats.ninToday.toLocaleString()}</p>
+                <p className="text-xs text-muted-foreground">Today (UTC)</p>
+              </div>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader>
-              <CardTitle>Lockout register</CardTitle>
-              <CardDescription>48-hour locks triggered by abuse rules.</CardDescription>
+              <CardTitle>DOB corrections on Prognosis</CardTitle>
+              <CardDescription>
+                Successful writes to <code>UpdateBiodata</code>.
+              </CardDescription>
             </CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted-foreground">
-                Phase 4 adds search + single-click unlock for ops. Schema:
-                <code className="mx-1 rounded bg-muted px-1 py-0.5 text-xs">Lockout</code>.
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Audit trail</CardTitle>
-              <CardDescription>Append-only, 12-month retention.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted-foreground">
-                Every sensitive action already emits a structured event today via
-                <code className="mx-1 rounded bg-muted px-1 py-0.5 text-xs">src/server/audit.ts</code>
-                with a <code>traceId</code> joining client + server.
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Export</CardTitle>
-              <CardDescription>CSV/XLSX for ops reporting.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted-foreground">
-                Phase 4. Confirm the required column list with the client first.
-              </p>
+            <CardContent className="flex items-baseline gap-6">
+              <div>
+                <p className="text-3xl font-bold tabular-nums">{stats.dobTotal.toLocaleString()}</p>
+                <p className="text-xs text-muted-foreground">All time</p>
+              </div>
+              <div>
+                <p className="text-2xl font-semibold tabular-nums">{stats.dobToday.toLocaleString()}</p>
+                <p className="text-xs text-muted-foreground">Today (UTC)</p>
+              </div>
             </CardContent>
           </Card>
         </div>
 
-        <p className="rounded-md border border-warning/40 bg-warning/10 p-3 text-xs">
-          This page is a Phase 4 placeholder. Role-gating via NextAuth v5 arrives
-          in Phase 2 so this route is not protected yet.
-        </p>
+        <div className="grid gap-4 md:grid-cols-3">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Manual review queue</CardTitle>
+              <CardDescription>
+                NIN submissions with a 0.80–0.92 name score.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button asChild size="sm" variant="outline">
+                <Link href="/admin/reviews">Open queue</Link>
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Unlock a member</CardTitle>
+              <CardDescription>Reset a 48-hour hard lock.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button asChild size="sm" variant="outline">
+                <Link href="/admin/unlock">Unlock</Link>
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Audit trail</CardTitle>
+              <CardDescription>
+                Filter <code>prognosis.upsert.ok</code> in Azure log stream.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-xs text-muted-foreground">
+                Every counter above is also written as a structured audit event.
+              </p>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </PageShell>
   );

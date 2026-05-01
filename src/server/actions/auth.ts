@@ -24,6 +24,7 @@ import { notifyLockout } from "@/server/notify";
 import { enqueuePrognosis } from "@/server/outbox";
 import { notifyNinValidated } from "@/server/notify";
 import { updateEnrolleeDob } from "@/services/http/PrognosisMemberClient";
+import { recordNinSuccess, recordDobUpdateSuccess } from "@/server/stats";
 import { appConfig } from "@/config/app";
 import { composeDobMismatchMessage } from "@/lib/displayName";
 
@@ -383,6 +384,7 @@ export async function authByPrincipalNin(
           payload: { txnRef: payload.txnRef },
         });
         if (write.ok) {
+          await recordNinSuccess();
           await notifyNinValidated({
             principalEnrolleeId: parsed.data.enrolleeId,
             beneficiaryName: verify.verifiedFullName ?? principal.fullName,
@@ -404,6 +406,7 @@ export async function authByPrincipalNin(
             memberId: principal.id,
             traceId: tid,
           });
+          if (dobResult.ok) await recordDobUpdateSuccess();
         } catch {
           /* non-fatal — member is authenticated; DOB correction can be retried */
         }
