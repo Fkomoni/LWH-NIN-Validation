@@ -279,6 +279,7 @@ interface MatchedProfile {
   fullName: string;
   dob?: string;
   memberId: string;
+  relationship?: string;
   score: number;
 }
 
@@ -383,6 +384,7 @@ export async function quickSubmitNin(
     fullName: p.fullName,
     dob: p.dob,
     memberId: p.enrolleeId,
+    relationship: p.relationship,
     score: scoreNameMatch(p.fullName, call.data.fullName ?? "").score,
   }));
   const best = matches.reduce((a, b) => (a.score >= b.score ? a : b));
@@ -521,6 +523,7 @@ export async function quickConfirmDob(
     fullName: p.fullName,
     dob: p.dob,
     memberId: p.enrolleeId,
+    relationship: p.relationship,
     score: 0, // DOB-fallback path — name didn't match
   }));
 
@@ -702,7 +705,14 @@ async function persistMatches(
           payload: { txnRef: ref },
         });
         if (write.ok) {
-          await recordNinSuccess();
+          // The phone-first flow always lands the principal first
+          // (Prognosis registers phone numbers against the policy
+          // holder). Treat anything explicitly tagged as PRINCIPAL or
+          // SELF as such; everything else as a dependant.
+          const rel = (m.relationship ?? "").toLowerCase();
+          const isPrincipal =
+            rel.includes("principal") || rel.includes("self") || rel === "";
+          await recordNinSuccess(isPrincipal ? "PRINCIPAL" : "DEPENDENT");
           await notifyNinValidated({
             principalEnrolleeId: m.enrolleeId,
             beneficiaryName: verifiedFullName,

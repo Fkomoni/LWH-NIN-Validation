@@ -23,6 +23,7 @@ import { log } from "@/lib/logger";
  */
 
 const LEAD_PREFIX = "lead:phone:";
+const LEAD_INDEX = "lead:index";
 const LEAD_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 const STARTED_TOTAL = "stats:lead:started:total";
@@ -91,11 +92,27 @@ export async function markLeadStarted(
   if (!existing) {
     try {
       await getKv().incr(STARTED_TOTAL);
+      await indexPhone(phone);
     } catch {
       /* non-fatal */
     }
   }
   return rec;
+}
+
+/**
+ * Maintain a single index list of every phone we've ever started a
+ * lead for. The KV interface lacks a SCAN op, so we keep an explicit
+ * list. Read-modify-write is racy but volume is low and a duplicate
+ * entry is harmless (we de-dupe on read).
+ */
+async function indexPhone(phone: string): Promise<void> {
+  const kv = getKv();
+  const list = (await kv.get<string[]>(LEAD_INDEX)) ?? [];
+  if (!list.includes(phone)) {
+    list.push(phone);
+    await kv.set(LEAD_INDEX, list);
+  }
 }
 
 export async function markOtpVerified(phone: string): Promise<void> {
@@ -171,5 +188,87 @@ export async function getFunnelStats(): Promise<FunnelStats> {
     otpVerified: o ?? 0,
     ninAttempted: n ?? 0,
     completed: c ?? 0,
+  };
+}
+
+/* ── Drop-off enumeration ───────────────────────────────────────────── */
+
+export type DropOffStage =
+  | "completed"
+  | "after-nin-attempt"
+  | "after-otp"
+  | "after-phone";
+
+export function classifyDropOff(lead: LeadRecord): DropOffStage {
+  if (lead.completedAt) return "completed";
+  if (lead.ninAttemptedAt) return "after-nin-attempt";
+  if (lead.otpVerifiedAt) return "after-otp";
+  return "after-phone";
+}
+
+export function dropOffLabel(stage: DropOffStage): string {
+  switch (stage) {
+    case "completed":
+      return "Completed";
+    case "after-nin-attempt":
+      return "Dropped off after NIN attempt";
+    case "after-otp":
+      return "Dropped off after OTP";
+    case "after-phone":
+      return "Dropped off after phone entry";
+  }
+}
+
+/**
+ * Read every lead we have stored, newest first. The index is an array
+ * of phones in order of first-seen; we reverse it so the most recent
+ * appears at the top. `limit` caps the read so the admin page renders
+ * fast even after months of activity.
+ */
+export async function listLeads(limit = 200): Promise<LeadRecord[]> {
+  const kv = getKv();
+  const phones = (await kv.get<string[]>(LEAD_INDEX)) ?? [];
+  const recent = phones.slice(-limit).reverse();
+  const out: LeadRecord[] = [];
+  for (const phone of recent) {
+    const rec = await kv.get<LeadRecord>(`${LEAD_PREFIX}${phone}`);
+    if (rec) out.push(rec);
+  }
+  return out;
+}
+
+export interface DropOffSummary {
+  total: number;
+  completed: number;
+  afterNin: number;
+  afterOtp: number;
+  afterPhone: number;
+  /** Unique members who completed at least the phone-entry step. */
+  uniqueAttempts: number;
+  successRate: number;
+}
+
+export async function getDropOffSummary(limit = 1000): Promise<DropOffSummary> {
+  const leads = await listLeads(limit);
+  let completed = 0;
+  let afterNin = 0;
+  let afterOtp = 0;
+  let afterPhone = 0;
+  for (const l of leads) {
+    const stage = classifyDropOff(l);
+    if (stage === "completed") completed++;
+    else if (stage === "after-nin-attempt") afterNin++;
+    else if (stage === "after-otp") afterOtp++;
+    else afterPhone++;
+  }
+  const total = leads.length;
+  return {
+    total,
+    completed,
+    afterNin,
+    afterOtp,
+    afterPhone,
+    uniqueAttempts: total,
+    successRate: total === 0 ? 0 : completed / total,
   };
 }

@@ -16,6 +16,7 @@ import { audit } from "@/server/audit";
 import { traceId } from "@/lib/ids";
 import { rateLimit } from "@/server/rateLimit";
 import { enrolleeIdSchema } from "@/schemas/auth";
+import { addAdmin, removeAdmin, isAdminAllowed } from "@/server/admin/allowlist";
 
 async function clientIp(): Promise<string> {
   const h = await headers();
@@ -59,6 +60,23 @@ export async function adminLogin(
       payload: { email },
     });
     return { status: "error", message: "Invalid credentials." };
+  }
+
+  // Allowlist check — applies once the list has at least one email.
+  // While empty, any email + the bootstrap password works (so the
+  // very first admin can sign in and add the others).
+  if (!(await isAdminAllowed(email))) {
+    await audit({
+      action: "admin.login.notAllowed",
+      actorType: "system",
+      traceId: traceId(),
+      ip,
+      payload: { email },
+    });
+    return {
+      status: "error",
+      message: "This email is not on the admin allowlist. Ask an existing admin to add you.",
+    };
   }
 
   await setAdminSession(admin);
@@ -162,4 +180,54 @@ export async function resetMemberAction(
   await adminResetMember(parsed.data, admin.id);
   revalidatePath("/admin/unlock");
   return { status: "ok", enrolleeId: parsed.data };
+}
+
+/* ── Admin allowlist management ─────────────────────────────────────── */
+
+export type AdminAllowlistState =
+  | { status: "idle" }
+  | { status: "ok"; message: string }
+  | { status: "error"; message: string };
+
+const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+
+export async function addAdminAction(
+  _prev: AdminAllowlistState,
+  formData: FormData,
+): Promise<AdminAllowlistState> {
+  const me = await requireAdmin();
+  const email = String(formData.get("email") ?? "").trim().toLowerCase();
+  if (!email || !emailRegex.test(email)) {
+    return { status: "error", message: "Please enter a valid email address." };
+  }
+  await addAdmin(email);
+  await audit({
+    action: "admin.allowlist.add",
+    actorType: "admin",
+    actorId: me.id,
+    traceId: traceId(),
+    payload: { email },
+  });
+  revalidatePath("/admin/admins");
+  return { status: "ok", message: `${email} added.` };
+}
+
+export async function removeAdminAction(formData: FormData): Promise<void> {
+  const me = await requireAdmin();
+  const email = String(formData.get("email") ?? "").trim().toLowerCase();
+  if (!email) return;
+  // Keep at least one admin on the list so we don't lock everyone out
+  // by removing the last entry.
+  const { getAllowlist } = await import("@/server/admin/allowlist");
+  const current = await getAllowlist();
+  if (current.length <= 1 && current.includes(email)) return;
+  await removeAdmin(email);
+  await audit({
+    action: "admin.allowlist.remove",
+    actorType: "admin",
+    actorId: me.id,
+    traceId: traceId(),
+    payload: { email },
+  });
+  revalidatePath("/admin/admins");
 }

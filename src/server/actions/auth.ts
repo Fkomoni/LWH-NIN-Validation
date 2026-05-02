@@ -384,7 +384,7 @@ export async function authByPrincipalNin(
           payload: { txnRef: payload.txnRef },
         });
         if (write.ok) {
-          await recordNinSuccess();
+          await recordNinSuccess("PRINCIPAL");
           await notifyNinValidated({
             principalEnrolleeId: parsed.data.enrolleeId,
             beneficiaryName: verify.verifiedFullName ?? principal.fullName,

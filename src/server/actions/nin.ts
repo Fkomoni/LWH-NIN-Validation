@@ -107,7 +107,8 @@ export async function submitBeneficiaryNin(input: unknown): Promise<NinSubmitRes
           payload: { txnRef: ref },
         });
         if (write.ok) {
-          await recordNinSuccess();
+          const isPrincipal = parsed.beneficiaryId === session.enrolleeId;
+          await recordNinSuccess(isPrincipal ? "PRINCIPAL" : "DEPENDENT");
           if (result.verifiedFullName) {
             await notifyNinValidated({
               principalEnrolleeId: session.enrolleeId,

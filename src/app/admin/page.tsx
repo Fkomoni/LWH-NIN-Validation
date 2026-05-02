@@ -6,7 +6,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/com
 import { getAdminSession } from "@/server/admin/session";
 import { adminLogout } from "@/server/actions/admin";
 import { getPortalStats } from "@/server/stats";
-import { getFunnelStats } from "@/server/leads";
+import { getFunnelStats, getDropOffSummary } from "@/server/leads";
 
 export const metadata = { title: "Admin — Leadway Health" };
 
@@ -19,13 +19,18 @@ export default async function AdminLandingPage() {
   const admin = await getAdminSession();
   if (!admin) redirect("/admin/login");
 
-  const stats = await getPortalStats();
-  const funnel = await getFunnelStats();
+  const [stats, funnel, dropoff] = await Promise.all([
+    getPortalStats(),
+    getFunnelStats(),
+    getDropOffSummary(),
+  ]);
+
   const dropOff = (from: number, to: number): string => {
     if (from === 0) return "—";
     const pct = Math.round(((from - to) / from) * 100);
     return `${pct}% drop-off`;
   };
+  const successRatePct = Math.round(dropoff.successRate * 100);
 
   return (
     <PageShell>
@@ -47,53 +52,107 @@ export default async function AdminLandingPage() {
           </form>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2">
+        {/* ── Top-level KPIs ─────────────────────────────────────────── */}
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <Card>
             <CardHeader>
-              <CardTitle>NIN updates on Prognosis</CardTitle>
-              <CardDescription>
-                Successful writes to <code>upsertMemberNin</code>.
-              </CardDescription>
+              <CardTitle className="text-sm">Unique members attempted</CardTitle>
             </CardHeader>
-            <CardContent className="flex items-baseline gap-6">
-              <div>
-                <p className="text-3xl font-bold tabular-nums">{stats.ninTotal.toLocaleString()}</p>
-                <p className="text-xs text-muted-foreground">All time</p>
-              </div>
-              <div>
-                <p className="text-2xl font-semibold tabular-nums">{stats.ninToday.toLocaleString()}</p>
-                <p className="text-xs text-muted-foreground">Today (UTC)</p>
-              </div>
+            <CardContent>
+              <p className="text-3xl font-bold tabular-nums">
+                {dropoff.uniqueAttempts.toLocaleString()}
+              </p>
+              <p className="text-xs text-muted-foreground">All time</p>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader>
-              <CardTitle>DOB corrections on Prognosis</CardTitle>
-              <CardDescription>
-                Successful writes to <code>UpdateBiodata</code>.
-              </CardDescription>
+              <CardTitle className="text-sm">Successful</CardTitle>
             </CardHeader>
-            <CardContent className="flex items-baseline gap-6">
-              <div>
-                <p className="text-3xl font-bold tabular-nums">{stats.dobTotal.toLocaleString()}</p>
-                <p className="text-xs text-muted-foreground">All time</p>
-              </div>
-              <div>
-                <p className="text-2xl font-semibold tabular-nums">{stats.dobToday.toLocaleString()}</p>
-                <p className="text-xs text-muted-foreground">Today (UTC)</p>
-              </div>
+            <CardContent>
+              <p className="text-3xl font-bold tabular-nums text-emerald-700">
+                {dropoff.completed.toLocaleString()}
+              </p>
+              <p className="text-xs text-muted-foreground">{successRatePct}% success rate</p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">Total NIN updates</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-3xl font-bold tabular-nums">
+                {stats.ninTotal.toLocaleString()}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {stats.ninToday.toLocaleString()} today
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">DOB corrections</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-3xl font-bold tabular-nums">
+                {stats.dobTotal.toLocaleString()}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {stats.dobToday.toLocaleString()} today
+              </p>
             </CardContent>
           </Card>
         </div>
 
+        {/* ── Principal vs dependent split ───────────────────────────── */}
+        <div className="grid gap-4 md:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle>Principal NINs updated</CardTitle>
+              <CardDescription>
+                NIN saved against the policy holder.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-3xl font-bold tabular-nums">
+                {stats.ninPrincipalTotal.toLocaleString()}
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Dependant NINs updated</CardTitle>
+              <CardDescription>
+                NIN saved against a spouse, child or other dependant.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-3xl font-bold tabular-nums">
+                {stats.ninDependentTotal.toLocaleString()}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* ── Funnel / drop-off panel ────────────────────────────────── */}
         <Card>
           <CardHeader>
-            <CardTitle>Quick-update funnel</CardTitle>
-            <CardDescription>
-              How many members started the phone-first flow and how far they got.
-              Drop-offs are candidates for a follow-up call.
-            </CardDescription>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <CardTitle>Quick-update funnel</CardTitle>
+                <CardDescription>
+                  How many members reached each step. Drop-offs are candidates for
+                  a follow-up call.
+                </CardDescription>
+              </div>
+              <Button asChild size="sm" variant="outline">
+                <Link href="/admin/leads">Open intervention list</Link>
+              </Button>
+            </div>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
@@ -128,15 +187,44 @@ export default async function AdminLandingPage() {
                 </p>
               </div>
             </div>
+            <div className="mt-4 grid grid-cols-2 gap-3 text-xs md:grid-cols-4">
+              <p className="rounded-md bg-red-50 p-2 text-red-800">
+                After phone: <span className="font-bold">{dropoff.afterPhone}</span>
+              </p>
+              <p className="rounded-md bg-red-50 p-2 text-red-800">
+                After OTP: <span className="font-bold">{dropoff.afterOtp}</span>
+              </p>
+              <p className="rounded-md bg-amber-50 p-2 text-amber-800">
+                After NIN: <span className="font-bold">{dropoff.afterNin}</span>
+              </p>
+              <p className="rounded-md bg-emerald-50 p-2 text-emerald-800">
+                Completed: <span className="font-bold">{dropoff.completed}</span>
+              </p>
+            </div>
           </CardContent>
         </Card>
 
-        <div className="grid gap-4 md:grid-cols-3">
+        {/* ── Tools ──────────────────────────────────────────────────── */}
+        <div className="grid gap-4 md:grid-cols-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Drop-off list</CardTitle>
+              <CardDescription>
+                Members who didn&apos;t finish — reach out to them.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button asChild size="sm" variant="outline">
+                <Link href="/admin/leads">Open</Link>
+              </Button>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Manual review queue</CardTitle>
               <CardDescription>
-                NIN submissions with a 0.80–0.92 name score.
+                NIN submissions with a borderline name score.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -160,15 +248,13 @@ export default async function AdminLandingPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Audit trail</CardTitle>
-              <CardDescription>
-                Filter <code>prognosis.upsert.ok</code> in Azure log stream.
-              </CardDescription>
+              <CardTitle className="text-base">Manage admins</CardTitle>
+              <CardDescription>Add or remove ops users.</CardDescription>
             </CardHeader>
             <CardContent>
-              <p className="text-xs text-muted-foreground">
-                Every counter above is also written as a structured audit event.
-              </p>
+              <Button asChild size="sm" variant="outline">
+                <Link href="/admin/admins">Manage</Link>
+              </Button>
             </CardContent>
           </Card>
         </div>
