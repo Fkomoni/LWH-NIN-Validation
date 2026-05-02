@@ -25,12 +25,18 @@ export default function LandingPage() {
             </p>
             <div className="flex flex-wrap items-center gap-3 pt-2">
               <Button asChild size="lg">
-                <Link href="/auth">Start NIN update</Link>
+                <Link href="/quick">Start NIN update</Link>
               </Button>
               <span className="text-xs text-muted-foreground">
                 Takes about 2 minutes · secure &amp; NDPA-compliant
               </span>
             </div>
+            <p className="text-xs text-muted-foreground">
+              <Link href="/auth" className="underline underline-offset-2">
+                Have your Enrollee ID? Use it instead
+              </Link>
+              .
+            </p>
           </div>
 
           <HeroArt />
@@ -43,19 +49,18 @@ export default function LandingPage() {
           {[
             {
               n: "1",
-              title: "Authenticate",
-              body: "Enter your Enrollee ID and date of birth.",
+              title: "Enter your phone number",
+              body: "We'll send a 6-digit code to confirm it's yours.",
             },
             {
               n: "2",
-              title: "Review your household",
-              body: "See yourself and your dependants in one list.",
+              title: "Submit your NIN",
+              body: "We check it with NIMC and update your Leadway record.",
             },
             {
               n: "3",
-              title: "Submit NINs",
-              body:
-                "Validate each NIN against NIMC — we'll take care of updating our records.",
+              title: "Add family members (optional)",
+              body: "Update NINs for your dependants in the same session.",
             },
           ].map((s) => (
             <div key={s.n} className="rounded-lg border p-4">

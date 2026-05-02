@@ -294,6 +294,58 @@ export async function getEnrolleeBioDataByPhone(rawPhone: string): Promise<Progn
 }
 
 /**
+ * Look up every member whose mobile number matches `rawPhone`.
+ *
+ * The same phone may be registered against more than one Leadway
+ * profile (e.g. a husband on his own plan + his wife's family plan,
+ * both with him as the contact). The quick-update flow needs all
+ * matches so the member can pick which profiles to update.
+ *
+ * Endpoint returns an array — we don't paginate because Prognosis
+ * caps responses to a small N for this query in practice.
+ */
+export async function getAllEnrolleesByPhone(
+  rawPhone: string,
+): Promise<PrognosisMember[]> {
+  const base = process.env.PROGNOSIS_BASE_URL;
+  if (!base) throw new PrognosisProviderError("prognosis.missing-base-url");
+
+  const phone = normalizePhone(rawPhone);
+  const url = `${base}/EnrolleeProfile/GetEnrolleeBioDataByMobileNo?mobileno=${encodeURIComponent(phone)}`;
+
+  let status: number;
+  let body: unknown;
+  try {
+    ({ status, body } = await authedGet(url));
+  } catch (err) {
+    log.error({ err: String(err) }, "prognosis.phone.network-fail");
+    throw new PrognosisProviderError(String(err));
+  }
+
+  if (status === 401 || status === 403)
+    throw new PrognosisProviderError(`prognosis.phone.auth-${status}`, status);
+  if (status >= 500)
+    throw new PrognosisProviderError(`prognosis.phone.http-${status}`, status);
+  if (status === 404) return [];
+  if (status >= 400)
+    throw new PrognosisProviderError(`prognosis.phone.http-${status}`, status);
+
+  const unwrapped = unwrap(body);
+  const arr: unknown[] = Array.isArray(unwrapped) ? unwrapped : unwrapped ? [unwrapped] : [];
+  const out: PrognosisMember[] = [];
+  for (const row of arr) {
+    if (!row || typeof row !== "object") continue;
+    const m = mapMember(row as Body, "");
+    if (m) out.push(m);
+  }
+  log.info(
+    { path: "/EnrolleeProfile/GetEnrolleeBioDataByMobileNo", status, found: out.length },
+    "prognosis.phone.allMatches",
+  );
+  return out;
+}
+
+/**
  * Update an enrollee's date of birth on Prognosis.
  *
  * Endpoint: POST {BASE}/EnrolleeProfile/UpdateBiodata
