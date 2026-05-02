@@ -1,0 +1,62 @@
+# Render blueprint for the LWH NIN Update/Verification portal.
+# Confirmed host: Render. Day-one runs without Postgres — all state
+# (OTP, rate limit, lockout, manual-review queue, Prognosis outbox)
+# lives in in-memory KV. Phase 3 re-adds a managed Postgres block here
+# for audit persistence and the manual-review table.
+
+services:
+  - type: web
+    name: lwh-nin-validation
+    runtime: node
+    plan: starter
+    region: oregon
+    branch: claude/nin-verification-system-iyLLh
+    autoDeploy: true
+    buildCommand: pnpm install --frozen-lockfile && pnpm exec prisma generate && pnpm build
+    startCommand: pnpm start -p $PORT
+    healthCheckPath: /api/healthz
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NEXT_PUBLIC_MOCKS_ENABLED
+        value: "false"
+      # App-level secrets — set in the Render dashboard.
+      - key: AUTH_SECRET
+        generateValue: true
+      - key: ADMIN_SECRET
+        generateValue: true
+      - key: OTP_HMAC_SECRET
+        generateValue: true
+      - key: ADMIN_BOOTSTRAP_PASSWORD
+        sync: false
+      # Qore (NIMC)
+      - key: QORE_TOKEN_URL
+        sync: false
+      - key: QORE_NIN_VERIFY_URL
+        sync: false
+      - key: QORE_CLIENT_ID
+        sync: false
+      - key: QORE_SECRET_KEY
+        sync: false
+      # Prognosis
+      - key: PROGNOSIS_BASE_URL
+        value: https://prognosis-api.leadwayhealth.com/api
+      - key: PROGNOSIS_USERNAME
+        sync: false
+      - key: PROGNOSIS_PASSWORD
+        sync: false
+      # Optional — only if Leadway provisions a SEPARATE static key
+      # on a header distinct from Authorization.
+      - key: PROGNOSIS_API_KEY
+        sync: false
+      - key: PROGNOSIS_API_KEY_HEADER
+        sync: false
+      # Optional Phase-2 extras
+      - key: TURNSTILE_SITE_KEY
+        sync: false
+      - key: TURNSTILE_SECRET_KEY
+        sync: false
+      - key: SENTRY_DSN
+        sync: false
+      - key: LOG_LEVEL
+        value: info

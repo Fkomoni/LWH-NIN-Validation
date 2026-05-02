@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+      - name: Audit dependencies (fail on high or critical)
+        # Blocks merge on any high/critical advisory across the tree.
+        # Moderate advisories still show in the log but don't fail.
+        run: pnpm audit --audit-level high
+      - name: Prisma generate
+        run: pnpm exec prisma generate --schema=prisma/schema.prisma
+      - name: Lint
+        run: pnpm lint
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Unit tests
+        run: pnpm test
+        env:
+          NEXT_PUBLIC_MOCKS_ENABLED: "true"
+      - name: Build
+        run: pnpm build
+        env:
+          NEXT_PUBLIC_MOCKS_ENABLED: "true"

@@ -1,0 +1,243 @@
+// LWH NIN Verification — Prisma schema DRAFT
+// Status: pre-Phase-1 proposal, not yet applied.
+// Notes:
+//   - Sensitive columns (nin, phone, dobEncrypted) are stored as
+//     application-encrypted ciphertext (envelope AES-256-GCM). A parallel
+//     *_hash column (HMAC-SHA256 with a peppered key) supports equality
+//     lookup without decryption.
+//   - All timestamps are UTC; render in Africa/Lagos at the UI boundary.
+//   - Enums mirror the statuses enumerated in the brief verbatim.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Members (principals + dependants)
+// ────────────────────────────────────────────────────────────────────────────
+
+enum Relationship {
+  PRINCIPAL
+  SPOUSE
+  CHILD
+  PARENT
+  OTHER
+}
+
+enum NinStatus {
+  NOT_SUBMITTED
+  SUBMITTED
+  VALIDATING
+  VALIDATED
+  FAILED
+  UPDATED
+  MANUAL_REVIEW
+}
+
+model Member {
+  id               String        @id @default(cuid())
+  // Business key from Leadway core ("enrolleeId" for principals)
+  enrolleeId       String        @unique
+  principalId      String?       // null for principals; set for dependants
+  principal        Member?       @relation("PrincipalDependants", fields: [principalId], references: [id])
+  dependants       Member[]      @relation("PrincipalDependants")
+
+  fullName         String
+  relationship    Relationship
+  dobEncrypted     Bytes         // AES-256-GCM ciphertext of ISO date
+  dobHash          String        @unique(map: "member_dobHash_idx")   // HMAC for equality
+  phoneEncrypted   Bytes?
+  phoneHash        String?       @unique(map: "member_phoneHash_idx")
+  emailEncrypted   Bytes?
+
+  ninEncrypted     Bytes?
+  ninHash          String?       @unique(map: "member_ninHash_idx")
+  ninStatus        NinStatus     @default(NOT_SUBMITTED)
+  ninValidatedAt   DateTime?
+  ninValidatedName String?       // verified full name returned from NIMC
+  ninDobEncrypted  Bytes?        // DOB as returned by NIMC (for drift audit)
+
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  validations      NinValidationAttempt[]
+  prognosisWrites  PrognosisWrite[]
+  auditEvents      AuditEvent[]
+
+  @@index([principalId])
+  @@index([ninStatus])
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Auth / lockout
+// ────────────────────────────────────────────────────────────────────────────
+
+enum AuthAttemptChannel {
+  DOB
+  PRINCIPAL_NIN
+  OTP
+}
+
+enum AuthAttemptOutcome {
+  SUCCESS
+  FAIL
+  LOCKED
+}
+
+model AuthAttempt {
+  id           String              @id @default(cuid())
+  enrolleeId   String
+  channel      AuthAttemptChannel
+  outcome      AuthAttemptOutcome
+  ip           String
+  userAgent    String
+  traceId      String
+  createdAt    DateTime            @default(now())
+
+  @@index([enrolleeId, createdAt])
+  @@index([ip, createdAt])
+}
+
+model Lockout {
+  enrolleeId   String   @id
+  reason       String
+  lockedAt     DateTime @default(now())
+  expiresAt    DateTime // 48h from lockedAt
+  notifiedOps  Boolean  @default(false)
+
+  @@index([expiresAt])
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// OTP (short-lived; primary storage is Redis — this is audit of issuance)
+// ────────────────────────────────────────────────────────────────────────────
+
+model OtpIssuance {
+  id           String   @id @default(cuid())
+  enrolleeId   String
+  phoneHash    String
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime
+  resentCount  Int      @default(0)
+  verifiedAt   DateTime?
+
+  @@index([enrolleeId, createdAt])
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// NIN validation / Prognosis write
+// ────────────────────────────────────────────────────────────────────────────
+
+enum NinOutcome {
+  PASS_AUTO
+  REVIEW_SOFT
+  FAIL_HARD
+  PROVIDER_ERROR
+  TIMEOUT
+}
+
+model NinValidationAttempt {
+  id              String      @id @default(cuid())
+  memberId        String
+  member          Member      @relation(fields: [memberId], references: [id])
+  submittedByEnr  String      // principal enrolleeId that performed the submit
+  ninHash         String
+  nameScore       Float?      // Jaro-Winkler on normalised strings
+  dobMatched      Boolean?
+  outcome         NinOutcome
+  rawResponseRef  String?     // pointer into object store (not inline)
+  idempotencyKey  String      @unique(map: "nin_idem_idx")
+  traceId         String
+  createdAt       DateTime    @default(now())
+
+  @@index([memberId, createdAt])
+}
+
+model PrognosisWrite {
+  id              String      @id @default(cuid())
+  memberId        String
+  member          Member      @relation(fields: [memberId], references: [id])
+  payloadDigest   String      // hash of the mapped payload
+  txnRef          String      @unique
+  attempt         Int         @default(1)
+  status          String      // SENT | ACK | FAILED | RETRY_SCHEDULED
+  lastError       String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@index([memberId, createdAt])
+  @@index([status])
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Admin review queue
+// ────────────────────────────────────────────────────────────────────────────
+
+enum ManualReviewStatus {
+  OPEN
+  APPROVED
+  REJECTED
+}
+
+model ManualReview {
+  id           String              @id @default(cuid())
+  memberId     String
+  reason       String              // e.g. "name-score=0.87"
+  status       ManualReviewStatus  @default(OPEN)
+  assigneeId   String?
+  resolvedById String?
+  resolvedAt   DateTime?
+  notes        String?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  @@index([status, createdAt])
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Admin users (staff/ops) — separate from portal members
+// ────────────────────────────────────────────────────────────────────────────
+
+enum AdminRole {
+  READ_ONLY
+  OPS
+  ADMIN
+}
+
+model AdminUser {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  fullName     String
+  role         AdminRole @default(READ_ONLY)
+  disabledAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Audit log (append-only). Retain ≥ 12 months.
+// ────────────────────────────────────────────────────────────────────────────
+
+model AuditEvent {
+  id           String   @id @default(cuid())
+  at           DateTime @default(now())
+  traceId      String
+  actorType    String   // "portal-user" | "admin" | "system"
+  actorId      String?  // enrolleeId or adminUser.id (never PII)
+  action       String   // e.g. "auth.dob.fail", "nin.submit.pass_auto"
+  memberId     String?
+  member       Member?  @relation(fields: [memberId], references: [id])
+  ip           String?
+  userAgent    String?
+  payload      Json?    // pre-masked; never raw NIN/phone/email
+
+  @@index([at])
+  @@index([traceId])
+  @@index([memberId, at])
+  @@index([action, at])
+}
